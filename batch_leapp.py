@@ -96,6 +96,51 @@ def href(target: Path, base: Path) -> str:
     return quote(rel)
 
 
+# Mirrors iLEAPP's leapp_functions/lava_launcher.py: the page links to the LAVA
+# download page when LAVA isn't installed, exactly like the LEAPP GUIs do.
+LAVA_WEBSITE = "https://www.leapps.org/#lava"
+
+
+def lava_installed() -> bool:
+    """True if the LAVA desktop app is available on this machine.
+
+    Uses the same detection iLEAPP's GUI uses (open -Ra on macOS, the LAVA
+    executable / known install paths on Windows and Linux).
+    """
+    if sys.platform == "darwin":
+        try:
+            return subprocess.run(["open", "-Ra", "LAVA"],
+                                  capture_output=True, check=False).returncode == 0
+        except OSError:
+            return False
+    if sys.platform == "win32":
+        import shutil
+        if shutil.which("LAVA.exe") or shutil.which("lava.exe"):
+            return True
+        for env_name in ("LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"):
+            base = os.environ.get(env_name)
+            if base and (Path(base, "Programs", "LAVA", "LAVA.exe").is_file()
+                         or Path(base, "LAVA", "LAVA.exe").is_file()):
+                return True
+        return False
+    # Linux and others
+    import shutil
+    for name in ("lava", "LAVA", "lava.AppImage", "LAVA.AppImage"):
+        if shutil.which(name):
+            return True
+    for path in (Path.home() / "Applications" / "LAVA.AppImage",
+                 Path.home() / "Applications" / "lava.AppImage",
+                 Path.home() / ".local" / "bin" / "lava",
+                 Path("/opt/LAVA/LAVA.AppImage"),
+                 Path("/opt/lava/lava.AppImage")):
+        try:
+            if path.is_file() and os.access(path, os.X_OK):
+                return True
+        except OSError:
+            continue
+    return False
+
+
 def isolated_env(dest: Path):
     """Return an environment that points the LEAPP tool's *shared* config dir
     (history.json / settings.json) at a private folder under dest.
@@ -155,10 +200,16 @@ TOOL_ACCENT = {
 }
 
 
-def write_index(output_dir: Path, entries: list, tool: str = "LEAPP") -> Path:
+def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
+                lava_available: bool = True) -> Path:
     """Write a master index.html (styled to match leapps.org) linking every
     extraction's report folder, its index.html and its .lava file. Returns the
-    path written."""
+    path written.
+
+    The LAVA column mirrors the LEAPP GUIs: when LAVA is installed the button
+    opens the .lava project (via the OS file association); otherwise it links to
+    the LAVA download page.
+    """
     generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     title = f"{tool} batch report index"
     accent = TOOL_ACCENT.get(tool, "#F5C020")   # gold default
@@ -175,6 +226,17 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP") -> Path:
         return (f'<a{c} href="{href(target, base)}" target="_blank" '
                 f'rel="noopener">{html.escape(label)}</a>')
 
+    def lava_cell(e):
+        if e["lava"] is None:
+            return '<span class="missing">&mdash;</span>'
+        if lava_available:
+            return (f'<a class="btn lava" href="{href(e["lava"], output_dir)}" '
+                    f'target="_blank" rel="noopener" '
+                    f'title="Open this .lava project in LAVA">LAVA</a>')
+        # Mirror the GUI fallback: no LAVA installed -> link to the download page.
+        return (f'<a class="btn getlava" href="{LAVA_WEBSITE}" target="_blank" '
+                f'rel="noopener" title="LAVA is not installed — get it">Get LAVA</a>')
+
     rows = []
     for e in entries:
         status = e["status"]
@@ -184,7 +246,7 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP") -> Path:
             f'<td class="mono">{html.escape(e["zip"])}</td>'
             f'<td class="mono">{cell_link(e["dest"], output_dir, e["dest"].name, "folder")}</td>'
             f'<td>{cell_link(e["index"], output_dir, "report", "btn")}</td>'
-            f'<td>{cell_link(e["lava"], output_dir, "lava", "btn lava")}</td>'
+            f'<td>{lava_cell(e)}</td>'
             f'<td><span class="badge {status}">{html.escape(status)}</span></td>'
             "</tr>"
         )
@@ -245,6 +307,8 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP") -> Path:
           font-family:var(--font-head); text-transform:uppercase; letter-spacing:.06em; }}
   a.btn:hover {{ border-color:var(--accent); color:var(--accent); text-decoration:none; }}
   a.btn.lava {{ color:var(--lava); }}
+  a.btn.getlava {{ color:var(--off-black); background:var(--lava); border-color:var(--lava); }}
+  a.btn.getlava:hover {{ color:var(--off-black); background:#fff; border-color:#fff; }}
   .missing {{ color:var(--muted); }}
   .badge {{ display:inline-block; padding:.15rem .6rem; border-radius:999px; font-size:.72rem;
            font-weight:600; letter-spacing:.05em; text-transform:uppercase;
@@ -493,7 +557,7 @@ def main():
     ordered = [entries[d] for d in
                sorted(entries, key=lambda d: d.as_posix())]
     if ordered:
-        index_path = write_index(output_dir, ordered, tool)
+        index_path = write_index(output_dir, ordered, tool, lava_installed())
         print(f"\nWrote master index: {index_path}")
 
     print("=" * 60)

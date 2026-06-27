@@ -174,11 +174,22 @@ Per-zip folders are named from each zip's path **relative to** `INPUT_DIR` (e.g.
 | **Source dir** | Top-level directory the zip came from (e.g. `caseA`). Falls back to `INPUT_DIR`'s name for zips sitting directly in it. |
 | **Zip** | The zip's path relative to `INPUT_DIR`. |
 | **Report folder** | Link to that extraction's output directory. |
-| **Report** | Link straight to the LEAPP `index.html`. |
-| **LAVA** | Link to the `_lava_data.lava` file. |
+| **Report** | Link straight to the LEAPP `index.html`. Opens in a new tab. |
+| **LAVA** | Opens the `_lava_data.lava` project. Mirrors the LEAPP GUIs (see below). |
 | **Status** | `ok` / `failed` / `skipped` / `dry-run`, color-coded. |
 
 The page is styled to match **[leapps.org](https://leapps.org)** — dark gold-on-black theme, Barlow fonts, the LEAPPs logo, and a per-tool accent color (iLEAPP red, ALEAPP green, RLEAPP blue, VLEAPP purple) on the title. A summary of ok/failed/skipped counts sits in the header. The logo and favicon are **embedded** in the HTML (base64), so the page needs no external image files; the web fonts load from Google Fonts when online and fall back to system fonts offline.
+
+Links open in a new tab so the index stays put for the next click.
+
+### The LAVA button
+
+This mirrors what the LEAPP GUIs do (`leapp_functions/lava_launcher.py`). When the index is generated, batch-leapp checks whether the **LAVA desktop app** is installed on the machine, using the same detection iLEAPP uses (`open -Ra LAVA` on macOS; the LAVA executable / known install paths on Windows and Linux):
+
+- **LAVA installed** → the button (**LAVA**) links to the local `.lava` file, which opens in LAVA through the OS file association.
+- **LAVA not installed** → the button becomes **Get LAVA** and links to the download page, `https://www.leapps.org/#lava` — exactly the GUI fallback.
+
+> **Browser limitation:** a web page can't directly launch a native app (the LEAPP GUIs can because they're Python apps calling the OS). LAVA also registers no `lava://` URL scheme. So when LAVA is installed and you click the button from a browser, the `.lava` is handed to the OS / downloaded and then opens in LAVA via its file association — not a single in-app jump. True one-click-into-LAVA from a link would require LAVA to register a `lava://` scheme.
 
 All links are **relative**, so the whole `OUTPUT_DIR` is portable — zip it, move it, or drop it on a share and the links still resolve. The report and LAVA files are located by scanning each output folder, so they're found wherever the tool writes them. If a tool doesn't emit a `.lava` file, that cell simply shows `—`.
 
