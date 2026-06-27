@@ -290,21 +290,27 @@ def main():
     if jobs:
         print(f"\nRunning {len(jobs)} job(s) with {workers} worker(s)...\n")
 
+    total = len(jobs)
+    done = 0   # incremented by record(); called only on the main thread
+
     def record(res):
+        nonlocal done
+        done += 1
+        counter = f"[{done}/{total}]"
         job = res["job"]
         idx, lava = locate_report_files(job["dest"])
         rel_str = job["rel"].as_posix()
         if res["error"] == "timeout":
-            print(f"  TIMEOUT  {rel_str}  (after {args.timeout}s)")
+            print(f"{counter} TIMEOUT  {rel_str}  (after {args.timeout}s)")
             failed.append((job["zip"], "timeout"))
             status = "failed"
         elif res["rc"] == 0:
-            print(f"  OK       {rel_str}  ({res['elapsed']:.0f}s)")
+            print(f"{counter} OK       {rel_str}  ({res['elapsed']:.0f}s)")
             succeeded.append(job["zip"])
             status = "ok"
         else:
             log_hint = f", see {log_name}" if capture else ""
-            print(f"  FAILED   {rel_str}  (exit {res['rc']}{log_hint})")
+            print(f"{counter} FAILED   {rel_str}  (exit {res['rc']}{log_hint})")
             failed.append((job["zip"], f"exit {res['rc']}"))
             status = "failed"
         entries[job["dest"]] = {"root": job["root"], "zip": rel_str,
@@ -314,7 +320,7 @@ def main():
     try:
         if workers == 1:
             for job in jobs:
-                print(f"running: {job['rel'].as_posix()}")
+                print(f"[{done + 1}/{total}] running: {job['rel'].as_posix()}")
                 record(run_job(job, args.timeout, capture=False))
         else:
             with ThreadPoolExecutor(max_workers=workers) as pool:
