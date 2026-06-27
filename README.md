@@ -71,6 +71,7 @@ open /Volumes/Cases/ios_reports/index.html
 | `--python PATH` | current interpreter | Python used to run the tool (point at the tool's venv if it has one). |
 | `-t`, `--type TYPE` | `zip` | Extraction type passed with `-t`. |
 | `-j`, `--jobs N` | `1` | Number of LEAPP runs to execute in parallel. |
+| `--heartbeat SECONDS` | `30` | In parallel mode, print a "still running" line every N seconds so long runs don't look hung (`0` disables). |
 | `--timeout SECONDS` | none | Per-zip timeout; a run exceeding it is marked failed and the batch continues. |
 | `--skip-existing` | off | Skip a zip whose output folder already exists and is non-empty (resume a partial run). |
 | `--dry-run` | off | Print the exact commands without running the tool. |
@@ -124,15 +125,21 @@ Sequential (`-j 1`) — the tool's own output streams live, framed by counter li
 [2/4] running: caseB/b.zip
 ```
 
-Parallel (`-j > 1`) — verbose output goes to the per-job log; the screen shows one counter line per zip as each completes (the counter climbs `1 → total` in completion order):
+Parallel (`-j > 1`) — verbose output goes to the per-job log, so the screen instead shows a `START` line when each worker picks up a zip, a periodic **heartbeat** of what's still running (so long jobs never look hung), and a counter line as each completes (the counter climbs `1 → total` in completion order):
 
 ```
-Running 4 job(s) with 3 worker(s)...
-[1/4] OK       caseC/c.zip  (41s)
-[2/4] OK       caseA/a.zip  (44s)
-[3/4] FAILED   caseB/b.zip  (exit 1, see ileapp_run.log)
-[4/4] OK       caseD/d.zip  (52s)
+Running 4 job(s) with 2 worker(s)...
+  START    caseA/a.zip
+  START    caseB/b.zip
+  ...      2 running [0/4 done]: caseA/a.zip (30s), caseB/b.zip (30s)
+[1/4] OK       caseA/a.zip  (37s)
+  START    caseC/c.zip
+  ...      2 running [1/4 done]: caseB/b.zip (60s), caseC/c.zip (23s)
+[2/4] OK       caseB/b.zip  (66s)
+  ...
 ```
+
+The heartbeat interval is `--heartbeat SECONDS` (default 30; `0` disables it). It lists up to four in-flight zips with their elapsed times, plus `+N more` if more are running.
 
 It ends with the master-index path and a summary line: `Done. X ok, Y failed, Z skipped.` (plus a list of any failures).
 

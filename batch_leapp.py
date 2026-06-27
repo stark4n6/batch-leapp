@@ -19,6 +19,7 @@ import html
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -242,6 +243,14 @@ def main():
         help="Number of iLEAPP runs to execute in parallel",
     )
     parser.add_argument(
+        "--heartbeat",
+        type=int,
+        default=30,
+        metavar="SECONDS",
+        help="In parallel mode, print a 'still running' line every N seconds "
+             "(0 to disable)",
+    )
+    parser.add_argument(
         "--timeout",
         type=int,
         default=None,
@@ -351,19 +360,58 @@ def main():
                                 "dest": job["dest"], "index": idx,
                                 "lava": lava, "status": status}
 
+    # Track which jobs are currently in flight so the heartbeat can report
+    # them. Touched from worker + heartbeat threads, so guard with a lock.
+    active = {}                     # rel_str -> monotonic start time
+    active_lock = threading.Lock()
+    stop_beat = threading.Event()
+
+    def run_and_track(job):
+        rel_str = job["rel"].as_posix()
+        with active_lock:
+            active[rel_str] = time.monotonic()
+        print(f"  START    {rel_str}")
+        try:
+            return run_job(job, args.timeout, capture, isolate=True)
+        finally:
+            with active_lock:
+                active.pop(rel_str, None)
+
+    def heartbeat():
+        # stop_beat.wait() returns True the moment we're told to stop, so the
+        # thread exits promptly instead of sleeping out a full interval.
+        while not stop_beat.wait(args.heartbeat):
+            now = time.monotonic()
+            with active_lock:
+                snap = sorted(active.items(), key=lambda kv: kv[1])
+            if not snap:
+                continue
+            shown = ", ".join(f"{name} ({now - t:.0f}s)" for name, t in snap[:4])
+            more = f" +{len(snap) - 4} more" if len(snap) > 4 else ""
+            print(f"  ...      {len(snap)} running [{done}/{total} done]: {shown}{more}")
+
     try:
         if workers == 1:
             for job in jobs:
                 print(f"[{done + 1}/{total}] running: {job['rel'].as_posix()}")
                 record(run_job(job, args.timeout, capture=False))
         else:
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {pool.submit(run_job, job, args.timeout, capture,
-                                       isolate=True): job
-                           for job in jobs}
-                for fut in as_completed(futures):
-                    record(fut.result())
+            beat = None
+            if args.heartbeat > 0:
+                beat = threading.Thread(target=heartbeat, daemon=True)
+                beat.start()
+            try:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = {pool.submit(run_and_track, job): job
+                               for job in jobs}
+                    for fut in as_completed(futures):
+                        record(fut.result())
+            finally:
+                stop_beat.set()
+                if beat:
+                    beat.join(timeout=1)
     except KeyboardInterrupt:
+        stop_beat.set()
         print("\nInterrupted by user — writing index for completed runs.")
 
     # --- Phase 3: master index + summary (entries ordered to match zip order) ---
