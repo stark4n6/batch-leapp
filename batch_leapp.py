@@ -171,7 +171,9 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP") -> Path:
         if target is None:
             return '<span class="missing">&mdash;</span>'
         c = f' class="{cls}"' if cls else ""
-        return f'<a{c} href="{href(target, base)}">{html.escape(label)}</a>'
+        # Open in a new tab so the index stays put for the next click.
+        return (f'<a{c} href="{href(target, base)}" target="_blank" '
+                f'rel="noopener">{html.escape(label)}</a>')
 
     rows = []
     for e in entries:
