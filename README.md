@@ -101,6 +101,33 @@ python batch_leapp.py INPUT_DIR OUTPUT_DIR --leapp /path/to/<x>leapp.py -j 4
 
 ---
 
+## Console output
+
+Every run prints a banner (detected tool, zip count, output dir) and a running **`[done/total]` progress counter** so you always know how far along the batch is.
+
+Sequential (`-j 1`) — the tool's own output streams live, framed by counter lines:
+
+```
+[1/4] running: caseA/a.zip
+... live iLEAPP/ALEAPP output ...
+[1/4] OK       caseA/a.zip  (37s)
+[2/4] running: caseB/b.zip
+```
+
+Parallel (`-j > 1`) — verbose output goes to the per-job log; the screen shows one counter line per zip as each completes (the counter climbs `1 → total` in completion order):
+
+```
+Running 4 job(s) with 3 worker(s)...
+[1/4] OK       caseC/c.zip  (41s)
+[2/4] OK       caseA/a.zip  (44s)
+[3/4] FAILED   caseB/b.zip  (exit 1, see ileapp_run.log)
+[4/4] OK       caseD/d.zip  (52s)
+```
+
+It ends with the master-index path and a summary line: `Done. X ok, Y failed, Z skipped.` (plus a list of any failures).
+
+---
+
 ## Output layout
 
 ```
