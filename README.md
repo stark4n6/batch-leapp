@@ -180,4 +180,5 @@ All links are **relative**, so the whole `OUTPUT_DIR` is portable — zip it, mo
 - **Exit code** is `1` if any zip failed, otherwise `0` — convenient for scripting.
 - **Ctrl-C** stops launching new work and still writes the master index for whatever finished.
 - Rows for **failed** or **skipped** extractions still appear in the index; report/LAVA links show only when those files actually exist.
+- **macOS AppleDouble files are ignored.** On non-HFS volumes (exFAT, NTFS, SMB shares) macOS drops a `._name.zip` companion next to each real file. These are not archives, so they're skipped — otherwise a LEAPP tool would choke on one with `BadZipFile: File is not a zip file`.
 - The script is self-contained — copy it anywhere; it doesn't depend on this repository.

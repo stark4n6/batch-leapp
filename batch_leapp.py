@@ -27,8 +27,19 @@ from urllib.parse import quote
 
 
 def find_zips(root: Path):
-    """Return every *.zip under root, recursively, case-insensitively, sorted."""
-    return sorted(p for p in root.rglob("*") if p.is_file() and p.suffix.lower() == ".zip")
+    """Return every *.zip under root, recursively, case-insensitively, sorted.
+
+    Skips macOS AppleDouble companions ('._name.zip') — the small resource-fork
+    files macOS scatters next to real files on non-HFS volumes (exFAT, NTFS,
+    SMB). They end in .zip but are not archives, so feeding them to a LEAPP tool
+    raises 'BadZipFile: File is not a zip file'.
+    """
+    return sorted(
+        p for p in root.rglob("*")
+        if p.is_file()
+        and p.suffix.lower() == ".zip"
+        and not p.name.startswith("._")
+    )
 
 
 # Display names for the known LEAPP tools, keyed by script stem.
