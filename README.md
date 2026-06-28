@@ -143,6 +143,12 @@ The binaries are **unsigned** (notarizing/signing needs a paid Apple Developer I
 - **macOS** — Gatekeeper says "Apple cannot check it for malicious software." Right-click → **Open** once, or run `xattr -dr com.apple.quarantine "Batch LEAPP.app"`.
 - **Windows** — SmartScreen shows "Windows protected your PC." Click **More info → Run anyway**.
 
+> **The quarantine flag.** Anything downloaded from the internet — a GitHub Actions artifact or Release asset, a browser download, email, or AirDrop — gets macOS's `com.apple.quarantine` extended attribute. That attribute is what triggers the Gatekeeper prompt above; it is **not** set on binaries you built locally, which is why those open without complaint. To clear it for a downloaded build, right-click → **Open** once, or strip it from the Terminal:
+> ```bash
+> xattr -dr com.apple.quarantine "Batch LEAPP.app"   # or: xattr -d com.apple.quarantine batch-leapp
+> ```
+> Windows has an equivalent "Mark of the Web" — right-click the file → **Properties** → tick **Unblock**, or just **More info → Run anyway** at the SmartScreen prompt.
+
 If you have signing certificates, add the `codesign`/`signtool` step to the build scripts and I can wire it in.
 
 ### Automated builds (GitHub Actions)
