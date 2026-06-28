@@ -25,6 +25,18 @@ import batch_leapp as core
 
 DONE = "__DONE__"      # sentinel pushed on the queue when a run finishes
 
+# leapps.org palette (mirrors css/global.css).
+GOLD = "#F5C020"
+GOLD_DK = "#D4A010"
+OFF_BLACK = "#0E0E0E"
+SURFACE = "#161616"
+SURFACE2 = "#1C1C1C"
+BORDER = "#2C2C2C"
+TEXT = "#F0EDE6"
+MUTED = "#888888"
+OK_GREEN = "#A4C639"
+FAIL_RED = "#E30613"
+
 
 def detect_leapp():
     """Best-effort guess at an installed LEAPP tool to prefill the field."""
@@ -71,8 +83,55 @@ class BatchLeappGUI:
         self.skip_existing = tk.BooleanVar(value=False)
         self.dry_run = tk.BooleanVar(value=False)
 
+        self._apply_theme()
         self._build()
         self.root.after(100, self._drain)
+
+    # ---- theming ---------------------------------------------------------
+    def _apply_theme(self):
+        self.root.configure(bg=OFF_BLACK)
+        style = ttk.Style(self.root)
+        style.theme_use("clam")
+        style.configure(".", background=OFF_BLACK, foreground=TEXT,
+                        fieldbackground=SURFACE2, bordercolor=BORDER,
+                        lightcolor=BORDER, darkcolor=BORDER, troughcolor=SURFACE)
+        style.configure("TFrame", background=OFF_BLACK)
+        style.configure("TLabel", background=OFF_BLACK, foreground=TEXT)
+        style.configure("Header.TLabel", background=OFF_BLACK, foreground=TEXT,
+                        font=("Helvetica Neue", 22, "bold"))
+        style.configure("Status.TLabel", background=OFF_BLACK, foreground=MUTED)
+        style.configure("TButton", background=SURFACE2, foreground=TEXT,
+                        bordercolor=BORDER, focuscolor=GOLD, padding=6)
+        style.map("TButton",
+                  background=[("active", SURFACE), ("disabled", OFF_BLACK)],
+                  foreground=[("disabled", MUTED)],
+                  bordercolor=[("active", GOLD)])
+        style.configure("Accent.TButton", background=GOLD, foreground=OFF_BLACK,
+                        font=("Helvetica Neue", 12, "bold"), padding=6)
+        style.map("Accent.TButton",
+                  background=[("active", GOLD_DK), ("disabled", BORDER)],
+                  foreground=[("disabled", MUTED)])
+        style.configure("TEntry", fieldbackground=SURFACE2, foreground=TEXT,
+                        insertcolor=GOLD, bordercolor=BORDER, padding=4)
+        style.configure("TCheckbutton", background=OFF_BLACK, foreground=TEXT)
+        style.map("TCheckbutton", background=[("active", OFF_BLACK)],
+                  indicatorcolor=[("selected", GOLD)], foreground=[("active", GOLD)])
+        style.configure("TSpinbox", fieldbackground=SURFACE2, foreground=TEXT,
+                        arrowcolor=GOLD, bordercolor=BORDER, padding=3)
+
+    def _load_logo(self):
+        """Build a small PhotoImage of the LEAPPs logo from the base64 embedded
+        in batch_leapp. Returns the image (kept on self) or None."""
+        try:
+            b64 = core.LEAPP_LOGO_DATA_URI.split(",", 1)[1]
+            img = tk.PhotoImage(data=b64)
+            factor = max(1, img.height() // 56)
+            if factor > 1:
+                img = img.subsample(factor, factor)
+            self._logo_img = img        # keep a reference (Tk GC)
+            return img
+        except Exception:
+            return None
 
     # ---- layout ----------------------------------------------------------
     def _build(self):
@@ -81,8 +140,16 @@ class BatchLeappGUI:
         frm.pack(fill="both", expand=True)
         frm.columnconfigure(1, weight=1)
 
-        ttk.Label(frm, text="Batch LEAPP", font=("", 16, "bold")).grid(
-            row=0, column=0, columnspan=3, sticky="w", pady=(0, 8))
+        header = ttk.Frame(frm)
+        header.grid(row=0, column=0, columnspan=3, sticky="we", pady=(0, 12))
+        logo = self._load_logo()
+        if logo is not None:
+            tk.Label(header, image=logo, bg=OFF_BLACK).pack(side="left", padx=(0, 12))
+        titles = ttk.Frame(header)
+        titles.pack(side="left", anchor="center")
+        ttk.Label(titles, text="Batch LEAPP", style="Header.TLabel").pack(anchor="w")
+        ttk.Label(titles, text="Run iLEAPP / ALEAPP / RLEAPP / VLEAPP across a "
+                              "folder of zips", style="Status.TLabel").pack(anchor="w")
 
         self._path_row(frm, 1, "Input dir (zips)", self.input_dir, self._pick_indir)
         self._path_row(frm, 2, "Output dir", self.output_dir, self._pick_outdir)
@@ -102,7 +169,8 @@ class BatchLeappGUI:
 
         btns = ttk.Frame(frm)
         btns.grid(row=5, column=0, columnspan=3, sticky="we", **pad)
-        self.run_btn = ttk.Button(btns, text="Run", command=self._start)
+        self.run_btn = ttk.Button(btns, text="Run", command=self._start,
+                                  style="Accent.TButton")
         self.run_btn.pack(side="left")
         self.stop_btn = ttk.Button(btns, text="Stop", command=self._stop, state="disabled")
         self.stop_btn.pack(side="left", padx=6)
@@ -112,13 +180,20 @@ class BatchLeappGUI:
         self.open_out_btn = ttk.Button(btns, text="Open output folder",
                                        command=self._open_output, state="disabled")
         self.open_out_btn.pack(side="left", padx=6)
-        self.status = ttk.Label(btns, text="Idle")
+        self.status = ttk.Label(btns, text="Idle", style="Status.TLabel")
         self.status.pack(side="right")
 
-        self.log = scrolledtext.ScrolledText(frm, height=18, wrap="none",
-                                             font=("Menlo", 11))
+        self.log = scrolledtext.ScrolledText(
+            frm, height=18, wrap="none", font=("Menlo", 11),
+            bg=SURFACE, fg=TEXT, insertbackground=GOLD, borderwidth=0,
+            highlightthickness=1, highlightbackground=BORDER,
+            selectbackground=GOLD_DK, selectforeground=OFF_BLACK)
         self.log.grid(row=6, column=0, columnspan=3, sticky="nsew", **pad)
         frm.rowconfigure(6, weight=1)
+        self.log.tag_configure("ok", foreground=OK_GREEN)
+        self.log.tag_configure("fail", foreground=FAIL_RED)
+        self.log.tag_configure("muted", foreground=MUTED)
+        self.log.tag_configure("accent", foreground=GOLD)
         self.log.configure(state="disabled")
 
     def _path_row(self, frm, row, label, var, cmd):
@@ -250,9 +325,21 @@ class BatchLeappGUI:
         if self.last_output:
             open_path(self.last_output)
 
+    @staticmethod
+    def _line_tag(text):
+        up = text.upper()
+        if any(k in up for k in ("FAIL", "ERROR", "TIMEOUT")):
+            return "fail"
+        if " OK " in up or up.strip().startswith("OK"):
+            return "ok"
+        if (text.startswith("===") or "START" in up or "HEARTBEAT" in up
+                or "still running" in text or "STILL RUNNING" in up):
+            return "muted"
+        return ""
+
     def _append(self, text):
         self.log.configure(state="normal")
-        self.log.insert("end", text)
+        self.log.insert("end", text, self._line_tag(text))
         self.log.see("end")
         self.log.configure(state="disabled")
 
