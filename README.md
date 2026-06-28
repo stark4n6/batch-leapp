@@ -43,6 +43,17 @@ python batch_leapp_gui.py
 
 Pick the input dir, output dir, and LEAPP tool, set parallel jobs, and click **Run** — a live log streams in the window, with **Stop**, **Open report index**, and **Open output folder** buttons. It tries to auto-detect an installed LEAPP tool to prefill the field.
 
+#### macOS app (double-clickable)
+
+To build a standalone `Batch LEAPP.app` (bundles Python + Tk, no terminal needed):
+
+```bash
+python3 -m pip install pyinstaller   # one-time
+./build_macos.sh                     # → dist/Batch LEAPP.app
+```
+
+Drag the `.app` to `/Applications`. It's **unsigned**: on the machine that built it, it opens normally; if you zip and share it, the recipient right-clicks → **Open** the first time (or runs `xattr -dr com.apple.quarantine "Batch LEAPP.app"`) to clear Gatekeeper. The build is for the Mac's own architecture (Apple Silicon or Intel).
+
 ### Command line
 
 ```bash
