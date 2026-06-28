@@ -10,6 +10,8 @@ Point it at a directory of extractions, walk away, and come back to a review-rea
 
 > 📦 **[Download the latest release](https://github.com/abrignoni/batch-leapp/releases/latest)** — prebuilt macOS & Windows apps, no Python required.
 
+<p align="center"><img src="docs/gui.png" alt="Batch LEAPP GUI running a batch" width="640"></p>
+
 ---
 
 ## Download
@@ -284,6 +286,8 @@ Per-zip folders are named from each zip's path **relative to** `INPUT_DIR` (e.g.
 
 ### The master index
 
+<p align="center"><img src="docs/report-index.png" alt="Master HTML report index — one row per extraction with report, LAVA, status, and SHA-256" width="760"></p>
+
 `index.html` is one table with these columns:
 
 | Column | Meaning |
@@ -315,6 +319,8 @@ This mirrors what the LEAPP GUIs do (`leapp_functions/lava_launcher.py`). When t
 
 - **LAVA installed** → the button (**LAVA**) opens a small in-page dialog with the project's **full filesystem path** (resolved live from wherever the report currently sits, so it stays portable) and a **Copy** button, plus how to open it: paste into LAVA's *File ▸ Open*, double-click the `.lava` in your file manager, or `open "<path>"` on macOS/Linux. A "Download / open .lava" fallback is included.
 - **LAVA not installed** → the button becomes **Get LAVA**; the dialog shows the project path and a link to the download page, `https://www.leapps.org/#lava`.
+
+<p align="center"><img src="docs/lava-modal.png" alt="The Open-in-LAVA dialog showing the project path and how to open it" width="760"></p>
 
 > **Why a dialog and not a direct launch?** A web page can't directly launch a native app (the LEAPP GUIs can because they're Python apps calling the OS), and LAVA registers no `lava://` URL scheme — a plain link would just download the `.lava`. The dialog avoids that surprise: it hands you the exact path to open in LAVA. True one-click-into-LAVA from a link would require LAVA to register a `lava://` scheme; if that ships, the button can link straight to it. The path is resolved client-side from `window.location`, so it's correct only when the index is opened from disk (`file://`) — the normal review workflow; served over `http`, the dialog falls back to the relative path.
 
