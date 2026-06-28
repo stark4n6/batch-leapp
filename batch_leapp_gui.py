@@ -93,6 +93,7 @@ class BatchLeappGUI:
 
         self._apply_theme()
         self._build()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(100, self._drain)
 
     # ---- theming ---------------------------------------------------------
@@ -333,7 +334,28 @@ class BatchLeappGUI:
     def _stop(self):
         self.stop_event.set()
         self.status.configure(text="Stopping…")
-        self._append("\n[stop requested — finishing in-flight jobs]\n")
+        self._append("\n[stop requested — terminating running LEAPP jobs]\n")
+
+    def _on_close(self):
+        """Don't leave LEAPP processes orphaned when the window is closed."""
+        if self.worker and self.worker.is_alive():
+            if not messagebox.askyesno(
+                    "Quit Batch LEAPP",
+                    "A batch is still running.\n\nStop the running LEAPP jobs "
+                    "and quit?"):
+                return
+            self.stop_event.set()
+            self.status.configure(text="Stopping…")
+            self._await_close()
+        else:
+            self.root.destroy()
+
+    def _await_close(self, tries=0):
+        # Let the worker terminate its child processes, then close (cap ~12s).
+        if self.worker and self.worker.is_alive() and tries < 60:
+            self.root.after(200, lambda: self._await_close(tries + 1))
+        else:
+            self.root.destroy()
 
     # ---- queue pump (runs on the Tk main thread) -------------------------
     def _drain(self):

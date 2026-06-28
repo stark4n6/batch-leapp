@@ -306,6 +306,7 @@ All links are **relative**, so the whole `OUTPUT_DIR` is portable — zip it, mo
 ## Behavior notes
 
 - **Exit code** is `1` if any archive failed or was invalid, otherwise `0` — convenient for scripting.
+- **Stop / closing the GUI terminates running jobs.** LEAPP children are launched so they can be killed — clicking **Stop**, or closing the window (you'll be asked to confirm), terminates the in-flight LEAPP processes instead of leaving them running as orphans.
 - **Ctrl-C** stops launching new work and still writes the master index and manifest for whatever finished.
 - Rows for **failed**, **invalid**, or **skipped** extractions still appear in the index and manifest; report/LAVA links show only when those files actually exist.
 - **Corrupt or mislabeled archives are flagged, not fatal.** Each archive is integrity-checked (zip central directory / tar header) before the LEAPP run; a bad one is marked `invalid` and the batch moves on.

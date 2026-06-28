@@ -323,29 +323,64 @@ def isolated_env(dest: Path):
     return env
 
 
-def run_job(job: dict, timeout, capture: bool, isolate: bool = False) -> dict:
+def _terminate(proc):
+    """Stop a child process: SIGTERM, then SIGKILL if it won't go."""
+    try:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    except Exception:
+        pass
+
+
+def run_job(job: dict, timeout, capture: bool, isolate: bool = False,
+            should_stop=None) -> dict:
     """Run one LEAPP subprocess. When capture is True (parallel mode) the
     combined output is captured and written to a per-job log file so concurrent
     runs don't garble the terminal. When isolate is True each run gets a private
     config dir so concurrent runs don't corrupt the shared history file.
+
+    The child is launched with Popen and polled, so `should_stop()` can
+    terminate a *running* LEAPP process (not just block new ones) — without
+    this, closing the GUI would leave iLEAPP running as an orphan.
     Returns a result dict."""
     start = time.time()
     env = isolated_env(job["dest"]) if isolate else None
-    try:
-        if capture:
-            proc = subprocess.run(
-                job["cmd"], timeout=timeout, text=True, env=env,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            )
-            output = proc.stdout
-        else:
-            proc = subprocess.run(job["cmd"], timeout=timeout, env=env)
-            output = None
-        rc, error = proc.returncode, None
-    except subprocess.TimeoutExpired as e:
-        output = e.output.decode(errors="replace") if isinstance(e.output, bytes) else e.output
-        rc, error = None, "timeout"
+    kw = {"env": env, "text": True}
+    if capture:
+        kw["stdout"] = subprocess.PIPE
+        kw["stderr"] = subprocess.STDOUT
+    deadline = (start + timeout) if timeout else None
 
+    try:
+        proc = subprocess.Popen(job["cmd"], **kw)
+    except OSError as e:
+        return {"job": job, "rc": None, "elapsed": time.time() - start,
+                "error": f"could not start: {e}"}
+
+    output, error = None, None
+    while True:
+        try:
+            output, _ = proc.communicate(timeout=0.5)
+            break
+        except subprocess.TimeoutExpired:
+            if should_stop and should_stop():
+                _terminate(proc)
+                error = "cancelled"
+            elif deadline and time.time() > deadline:
+                _terminate(proc)
+                error = "timeout"
+            else:
+                continue
+            try:                       # reap and collect whatever was produced
+                output, _ = proc.communicate(timeout=5)
+            except Exception:
+                output = None
+            break
+
+    rc = proc.returncode if error is None else None
     if capture and output:
         try:
             (job["dest"] / job["log_name"]).write_text(output, encoding="utf-8")
@@ -855,7 +890,8 @@ def run_batch(input_dir, output_dir, leapp, *, python=None,
             active[rel_str] = time.monotonic()
         log(f"[{job['n']}/{total}] START    {rel_str}")
         try:
-            res = run_job(job, timeout, capture, isolate=capture)
+            res = run_job(job, timeout, capture, isolate=capture,
+                          should_stop=should_stop)
         finally:
             with active_lock:
                 active.pop(rel_str, None)
