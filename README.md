@@ -114,7 +114,7 @@ To avoid this, **parallel runs (`-j > 1`) each get a private config dir** at `<o
 
 ## Console output
 
-Every run prints a banner (detected tool, zip count, output dir) and a running **`[done/total]` progress counter** so you always know how far along the batch is.
+Every run prints a banner (detected tool, zip count, output dir, **start time**) and a running **`[done/total]` progress counter** so you always know how far along the batch is.
 
 Sequential (`-j 1`) — the tool's own output streams live, framed by counter lines:
 
@@ -141,7 +141,16 @@ Running 4 job(s) with 2 worker(s)...
 
 The heartbeat interval is `--heartbeat SECONDS` (default 30; `0` disables it). It lists up to four in-flight zips with their elapsed times, plus `+N more` if more are running.
 
-It ends with the master-index path and a summary line: `Done. X ok, Y failed, Z skipped.` (plus a list of any failures).
+It ends with the master-index path and a summary block — counts plus **start, finish, and elapsed** time (and a list of any failures):
+
+```
+Done. 12 ok, 1 failed, 0 skipped.
+Started:  2026-06-27 09:14:02
+Finished: 2026-06-27 11:48:37
+Elapsed:  2h 34m 35s
+```
+
+The same start/finish/elapsed times also appear in the master index header.
 
 ---
 

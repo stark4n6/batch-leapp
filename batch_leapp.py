@@ -96,6 +96,18 @@ def href(target: Path, base: Path) -> str:
     return quote(rel)
 
 
+def fmt_duration(seconds: float) -> str:
+    """Format an elapsed time as e.g. '1h 03m 12s' / '4m 07s' / '38s'."""
+    total = int(round(seconds))
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m {s:02d}s"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
 # Mirrors iLEAPP's leapp_functions/lava_launcher.py: the page links to the LAVA
 # download page when LAVA isn't installed, exactly like the LEAPP GUIs do.
 LAVA_WEBSITE = "https://www.leapps.org/#lava"
@@ -201,7 +213,8 @@ TOOL_ACCENT = {
 
 
 def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
-                lava_available: bool = True) -> Path:
+                lava_available: bool = True, start_dt=None, end_dt=None,
+                elapsed=None) -> Path:
     """Write a master index.html (styled to match leapps.org) linking every
     extraction's report folder, its index.html and its .lava file. Returns the
     path written.
@@ -210,9 +223,17 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
     opens the .lava project (via the OS file association); otherwise it links to
     the LAVA download page.
     """
-    generated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    end_dt = end_dt or datetime.now()
     title = f"{tool} batch report index"
     accent = TOOL_ACCENT.get(tool, "#F5C020")   # gold default
+
+    meta_bits = [f"{len(entries)} extraction(s)"]
+    if start_dt is not None:
+        meta_bits.append(f"started {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    meta_bits.append(f"finished {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    if elapsed is not None:
+        meta_bits.append(f"elapsed {fmt_duration(elapsed)}")
+    meta_line = " &middot; ".join(html.escape(b) for b in meta_bits)
 
     counts = {"ok": 0, "failed": 0, "skipped": 0, "dry-run": 0}
     for e in entries:
@@ -327,7 +348,7 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
 <img class="logo" src="{LEAPP_LOGO_DATA_URI}" alt="LEAPPs logo">
 <div class="titles">
 <h1><span class="tool">{html.escape(tool)}</span> batch report index</h1>
-<div class="meta">{len(entries)} extraction(s) &middot; generated {html.escape(generated)}</div>
+<div class="meta">{meta_line}</div>
 </div>
 <div class="summary">{summary}</div>
 </header>
@@ -423,10 +444,14 @@ def main():
         print(f"No .zip files found under {input_dir}")
         return 0
 
+    start_dt = datetime.now()
+    start_perf = time.monotonic()
+
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Tool: {tool}  ({leapp})")
     print(f"Found {len(zips)} zip file(s) under {input_dir}")
-    print(f"Reports will be written under {output_dir}\n")
+    print(f"Reports will be written under {output_dir}")
+    print(f"Started:  {start_dt.strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     succeeded, failed, skipped = [], [], []
     entries = {}   # keyed by dest so parallel results land in the right row
@@ -553,15 +578,22 @@ def main():
         stop_beat.set()
         print("\nInterrupted by user — writing index for completed runs.")
 
+    end_dt = datetime.now()
+    elapsed = time.monotonic() - start_perf
+
     # --- Phase 3: master index + summary (entries ordered to match zip order) ---
     ordered = [entries[d] for d in
                sorted(entries, key=lambda d: d.as_posix())]
     if ordered:
-        index_path = write_index(output_dir, ordered, tool, lava_installed())
+        index_path = write_index(output_dir, ordered, tool, lava_installed(),
+                                 start_dt, end_dt, elapsed)
         print(f"\nWrote master index: {index_path}")
 
     print("=" * 60)
     print(f"Done. {len(succeeded)} ok, {len(failed)} failed, {len(skipped)} skipped.")
+    print(f"Started:  {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Finished: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Elapsed:  {fmt_duration(elapsed)}")
     if failed:
         print("\nFailures:")
         for zip_path, why in failed:
