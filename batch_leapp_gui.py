@@ -238,19 +238,32 @@ class BatchLeappGUI:
             self.output_dir.set(d)
 
     def _pick_leapp(self):
+        # On macOS a `filetypes` filter makes the open panel treat .app bundles
+        # as folders you navigate INTO instead of selecting — so omit it there
+        # and let packages be chosen as files.
+        kw = {}
+        if sys.platform != "darwin":
+            kw["filetypes"] = [("LEAPP tool", "*.py *.exe *.app *"),
+                               ("All files", "*")]
         f = filedialog.askopenfilename(
-            title="LEAPP script, binary, or .app",
-            filetypes=[("LEAPP tool", "*.py *.exe *.app *"), ("All files", "*")])
+            title="LEAPP script, binary, or .app", **kw)
         if not f:
             return
-        if core.is_gui_build(Path(f)):
+        p = Path(f)
+        # If they navigated inside a .app bundle, snap back to the bundle root.
+        for cand in (p, *p.parents):
+            if cand.suffix.lower() == ".app":
+                p = cand
+                break
+        if core.is_gui_build(p):
             messagebox.showerror(
                 "GUI build selected",
-                f"'{Path(f).name}' is the interactive GUI build and can't be used "
+                f"'{p.name}' is the interactive GUI build and can't be used "
                 f"for batch processing.\n\nChoose the command-line LEAPP tool "
-                f"(e.g. ileapp.py or the CLI binary).")
+                f"instead — the CLI binary, or the ileapp.py / aleapp.py script "
+                f"from the tool's source folder.")
             return
-        self.leapp.set(f)
+        self.leapp.set(str(p))
 
     # ---- run / stop ------------------------------------------------------
     def _start(self):
