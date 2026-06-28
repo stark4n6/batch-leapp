@@ -141,8 +141,16 @@ class BatchLeappGUI:
         f = filedialog.askopenfilename(
             title="LEAPP script, binary, or .app",
             filetypes=[("LEAPP tool", "*.py *.exe *.app *"), ("All files", "*")])
-        if f:
-            self.leapp.set(f)
+        if not f:
+            return
+        if core.is_gui_build(Path(f)):
+            messagebox.showerror(
+                "GUI build selected",
+                f"'{Path(f).name}' is the interactive GUI build and can't be used "
+                f"for batch processing.\n\nChoose the command-line LEAPP tool "
+                f"(e.g. ileapp.py or the CLI binary).")
+            return
+        self.leapp.set(f)
 
     # ---- run / stop ------------------------------------------------------
     def _start(self):
@@ -154,6 +162,13 @@ class BatchLeappGUI:
         if not self.dry_run.get() and not self.leapp.get():
             messagebox.showerror("Missing LEAPP tool",
                                  "Choose a LEAPP script, binary, or .app.")
+            return
+        if self.leapp.get() and core.is_gui_build(Path(self.leapp.get())):
+            messagebox.showerror(
+                "GUI build selected",
+                f"'{Path(self.leapp.get()).name}' is the interactive GUI build and "
+                f"can't be used for batch processing.\n\nChoose the command-line "
+                f"LEAPP tool instead.")
             return
 
         self._clear_log()

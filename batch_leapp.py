@@ -81,6 +81,12 @@ def leapp_target_ok(leapp: Path) -> bool:
     return leapp.is_file() or (leapp.suffix.lower() == ".app" and leapp.is_dir())
 
 
+def is_gui_build(leapp: Path) -> bool:
+    """True if the path looks like an interactive LEAPP *GUI* build (which can't
+    be driven with batch -t/-i/-o arguments)."""
+    return "gui" in leapp.stem.lower()
+
+
 def _macos_app_executable(app: Path) -> Path:
     """Return the CLI executable inside a macOS .app bundle."""
     import plistlib
@@ -536,11 +542,13 @@ def run_batch(input_dir, output_dir, leapp, *, python=sys.executable,
 
     if not input_dir.is_dir():
         raise BatchError(f"Input is not a directory: {input_dir}")
+    if is_gui_build(leapp):
+        raise BatchError(
+            f"'{leapp.name}' is the interactive GUI build, which can't be run in "
+            f"batch. Select the command-line LEAPP tool instead "
+            f"(e.g. ileapp.py or the CLI binary).")
     if not dry_run and not leapp_target_ok(leapp):
         raise BatchError(f"LEAPP tool not found: {leapp}")
-    if "gui" in leapp.stem.lower():
-        log(f"Warning: '{leapp.name}' looks like the interactive GUI build. "
-            f"Use the command-line LEAPP binary/script for batch processing.")
 
     zips = find_zips(input_dir)
     result = {"ok": [], "failed": [], "skipped": [], "index": None,
