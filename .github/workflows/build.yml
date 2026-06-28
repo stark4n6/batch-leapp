@@ -14,16 +14,8 @@ permissions:
 
 jobs:
   macos:
-    name: macOS (${{ matrix.arch }})
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: macos-14   # Apple Silicon
-            arch: arm64
-          - runner: macos-13   # Intel
-            arch: x86_64
-    runs-on: ${{ matrix.runner }}
+    name: macOS (arm64)
+    runs-on: macos-14            # Apple Silicon
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -35,21 +27,21 @@ jobs:
       - name: Package
         run: |
           cd dist
-          ditto -c -k --sequesterRsrc --keepParent "Batch LEAPP.app" "../Batch-LEAPP-macos-${{ matrix.arch }}.zip"
-          tar -czf "../batch-leapp-macos-${{ matrix.arch }}.tar.gz" batch-leapp
+          ditto -c -k --sequesterRsrc --keepParent "Batch LEAPP.app" "../Batch-LEAPP-macos-arm64.zip"
+          tar -czf "../batch-leapp-macos-arm64.tar.gz" batch-leapp
       - uses: actions/upload-artifact@v5
         with:
-          name: macos-${{ matrix.arch }}
+          name: macos-arm64
           path: |
-            Batch-LEAPP-macos-${{ matrix.arch }}.zip
-            batch-leapp-macos-${{ matrix.arch }}.tar.gz
+            Batch-LEAPP-macos-arm64.zip
+            batch-leapp-macos-arm64.tar.gz
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            Batch-LEAPP-macos-${{ matrix.arch }}.zip
-            batch-leapp-macos-${{ matrix.arch }}.tar.gz
+            Batch-LEAPP-macos-arm64.zip
+            batch-leapp-macos-arm64.tar.gz
 
   windows:
     name: Windows (x64)

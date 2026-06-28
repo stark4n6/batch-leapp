@@ -13,7 +13,7 @@
 # The binaries are UNSIGNED. On the machine that built them they open normally.
 # If you zip and share, the recipient must right-click → Open the first time (or
 # run `xattr -dr com.apple.quarantine <file>`) to clear Gatekeeper. The build is
-# for this Mac's architecture (Apple Silicon or Intel).
+# for this Mac's architecture (Apple Silicon).
 #
 set -euo pipefail
 cd "$(dirname "$0")"

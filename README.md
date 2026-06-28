@@ -106,7 +106,7 @@ open /Volumes/Cases/ios_reports/index.html
 
 You can package batch-leapp into native binaries that don't need Python installed — a double-clickable **GUI app** and a single-file **CLI binary** — using [PyInstaller](https://pyinstaller.org/). Build scripts and icons are included.
 
-> **Cross-compiling isn't supported:** build the macOS binaries on a Mac and the Windows binaries on Windows. Each build also targets the machine's own CPU architecture (Apple Silicon vs Intel, x64 vs ARM).
+> **Cross-compiling isn't supported:** build the macOS binaries on a Mac and the Windows binaries on Windows. Each build also targets the machine's own CPU architecture; the bundled scripts and CI target Apple Silicon on macOS.
 
 One-time setup on each machine:
 
@@ -153,7 +153,7 @@ If you have signing certificates, add the `codesign`/`signtool` step to the buil
 
 ### Automated builds (GitHub Actions)
 
-[`.github/workflows/build.yml`](.github/workflows/build.yml) builds everything in the cloud — **macOS (Apple Silicon + Intel)** and **Windows**, GUI and CLI — so you don't need a Windows machine. Two ways to run it:
+[`.github/workflows/build.yml`](.github/workflows/build.yml) builds everything in the cloud — **macOS (Apple Silicon)** and **Windows**, GUI and CLI — so you don't need a Windows machine. Two ways to run it:
 
 - **On demand:** GitHub → **Actions** tab → **Build binaries** → **Run workflow**. The binaries appear as downloadable **artifacts** on the run page.
 - **On a release:** push a version tag and the binaries are attached to a GitHub **Release** automatically:
@@ -161,7 +161,7 @@ If you have signing certificates, add the `codesign`/`signtool` step to the buil
   git tag v1.0.0 && git push origin v1.0.0
   ```
 
-Artifacts produced: `Batch-LEAPP-macos-arm64.zip`, `Batch-LEAPP-macos-x86_64.zip` (each with the `.app`), the matching `batch-leapp` CLI tarballs, and `Batch-LEAPP-windows-x64.zip` (GUI + CLI `.exe`). They're still unsigned — the same first-run steps apply.
+Artifacts produced: `Batch-LEAPP-macos-arm64.zip` (the `.app`), `batch-leapp-macos-arm64.tar.gz` (the CLI), and `Batch-LEAPP-windows-x64.zip` (GUI + CLI `.exe`). They're still unsigned — the same first-run steps apply. Apple Silicon covers every Mac since 2020; Intel macOS builds were dropped.
 
 ---
 
