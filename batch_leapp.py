@@ -250,13 +250,14 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
     def lava_cell(e):
         if e["lava"] is None:
             return '<span class="missing">&mdash;</span>'
-        if lava_available:
-            return (f'<a class="btn lava" href="{href(e["lava"], output_dir)}" '
-                    f'target="_blank" rel="noopener" '
-                    f'title="Open this .lava project in LAVA">LAVA</a>')
-        # Mirror the GUI fallback: no LAVA installed -> link to the download page.
-        return (f'<a class="btn getlava" href="{LAVA_WEBSITE}" target="_blank" '
-                f'rel="noopener" title="LAVA is not installed — get it">Get LAVA</a>')
+        rel = href(e["lava"], output_dir)
+        # Trigger an in-page modal (built in JS) instead of silently downloading.
+        cls = "btn lava lava-open" if lava_available else "btn getlava lava-open"
+        label = "LAVA" if lava_available else "Get LAVA"
+        title = ("Open this .lava project in LAVA" if lava_available
+                 else "LAVA not installed — how to get it")
+        return (f'<a class="{cls}" href="{rel}" data-rel="{rel}" '
+                f'title="{title}">{label}</a>')
 
     rows = []
     for e in entries:
@@ -279,6 +280,96 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
         + (f'<span class="badge dry-run">{counts["dry-run"]} dry-run</span>'
            if counts["dry-run"] else "")
     )
+
+    # Modal CSS / markup / script kept as plain strings (single braces) and
+    # injected as f-string *values*, so their braces aren't parsed as fields.
+    modal_css = """
+  .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,.6);
+    display:flex; align-items:center; justify-content:center; z-index:1000; padding:1rem; }
+  .modal-overlay[hidden] { display:none; }
+  .modal { background:var(--surface); border:1px solid var(--border);
+    border-top:3px solid var(--accent); border-radius:6px; max-width:560px; width:100%;
+    padding:1.5rem 1.75rem; position:relative; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+  .modal h2 { font-family:var(--font-head); text-transform:uppercase; letter-spacing:.04em;
+    font-size:1.3rem; margin-bottom:.5rem; color:var(--accent); }
+  .modal p { font-size:.9rem; margin:.5rem 0; }
+  .modal ol { margin:.5rem 0 .5rem 1.2rem; font-size:.88rem; }
+  .modal code { font-family:var(--font-mono); font-size:.82rem; background:var(--off-black);
+    padding:.1rem .35rem; border-radius:3px; }
+  .modal .pathbox { display:flex; gap:.5rem; margin:.85rem 0; }
+  .modal .pathbox input { flex:1; font-family:var(--font-mono); font-size:.8rem;
+    background:var(--off-black); color:var(--text); border:1px solid var(--border);
+    border-radius:3px; padding:.45rem .55rem; }
+  .modal .modal-close { position:absolute; top:.4rem; right:.7rem; background:none; border:none;
+    color:var(--muted); font-size:1.6rem; cursor:pointer; line-height:1; }
+  .modal .modal-close:hover { color:var(--text); }
+  .modal .btn { cursor:pointer; }
+"""
+
+    modal_html = (
+        '<div id="lava-modal" class="modal-overlay" hidden>'
+        '<div class="modal"><button class="modal-close" aria-label="Close">&times;</button>'
+        '<div id="lava-modal-body"></div></div></div>'
+    )
+
+    modal_js = """
+const LAVA_INSTALLED = __LAVA_INSTALLED__;
+const LAVA_WEBSITE = "__LAVA_WEBSITE__";
+function esc(s){return s.replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fsPath(rel){
+  try{
+    const u=new URL(rel, window.location.href);
+    if(u.protocol!=='file:') return null;
+    let p=decodeURIComponent(u.pathname);
+    if(/^\\/[A-Za-z]:\\//.test(p)) p=p.slice(1).replace(/\\//g,'\\\\');
+    return p;
+  }catch(e){return null;}
+}
+function copyText(t,btn){
+  const ta=document.createElement('textarea');ta.value=t;document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');btn.textContent='Copied';setTimeout(()=>btn.textContent='Copy',1500);}catch(e){}
+  document.body.removeChild(ta);
+}
+function pathbox(val){
+  return '<div class="pathbox"><input readonly value="'+esc(val)+'">'
+    +'<button class="btn" onclick="copyText(this.previousElementSibling.value,this)">Copy</button></div>';
+}
+function openLavaModal(rel){
+  const overlay=document.getElementById('lava-modal');
+  const body=document.getElementById('lava-modal-body');
+  const abs=fsPath(rel);
+  const shown=abs||decodeURIComponent(rel);
+  let h='';
+  if(LAVA_INSTALLED){
+    h+='<h2>Open in LAVA</h2>';
+    h+='<p>Your browser cannot launch LAVA directly. Open this project in LAVA one of these ways:</p>';
+    h+='<ol><li>In LAVA choose <b>File &#9656; Open</b> and paste the path below, or</li>'
+      +'<li>double-click the <code>.lava</code> file in your file manager.</li></ol>';
+    h+=pathbox(shown);
+    if(abs) h+='<p style="color:var(--muted);font-size:.82rem">macOS/Linux: run <code>open "'+esc(abs)+'"</code></p>';
+    h+='<p><a class="btn lava" href="'+rel+'" target="_blank" rel="noopener">Download / open .lava</a></p>';
+  }else{
+    h+='<h2>LAVA not installed</h2>';
+    h+='<p>This report includes a LAVA project, but LAVA was not detected on this machine. '
+      +'Install LAVA, then open the <code>.lava</code> file below.</p>';
+    h+=pathbox(shown);
+    h+='<p><a class="btn getlava" href="'+LAVA_WEBSITE+'" target="_blank" rel="noopener">Get LAVA</a></p>';
+  }
+  body.innerHTML=h; overlay.hidden=false;
+}
+document.addEventListener('click',function(e){
+  const a=e.target.closest('.lava-open');
+  if(a){e.preventDefault();openLavaModal(a.getAttribute('data-rel'));return;}
+  if(e.target.id==='lava-modal'||e.target.classList.contains('modal-close'))
+    document.getElementById('lava-modal').hidden=true;
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape'){const m=document.getElementById('lava-modal');if(m)m.hidden=true;}
+});
+"""
+    modal_js = (modal_js
+                .replace("__LAVA_INSTALLED__", "true" if lava_available else "false")
+                .replace("__LAVA_WEBSITE__", LAVA_WEBSITE))
 
     doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -341,6 +432,7 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
   footer {{ margin-top:2rem; padding-top:1rem; border-top:1px solid var(--border);
            color:var(--muted); font-size:.78rem; letter-spacing:.04em; }}
   footer a {{ color:var(--muted); }}
+{modal_css}
 </style>
 </head>
 <body>
@@ -363,6 +455,8 @@ def write_index(output_dir: Path, entries: list, tool: str = "LEAPP",
 </table>
 </div>
 <footer>Generated by <a href="https://github.com/abrignoni/batch-leapp">batch-leapp</a> &middot; reports by {html.escape(tool)} &middot; <a href="https://leapps.org">leapps.org</a></footer>
+{modal_html}
+<script>{modal_js}</script>
 </body>
 </html>
 """

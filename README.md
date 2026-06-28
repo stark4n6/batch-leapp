@@ -195,10 +195,10 @@ Links open in a new tab so the index stays put for the next click.
 
 This mirrors what the LEAPP GUIs do (`leapp_functions/lava_launcher.py`). When the index is generated, batch-leapp checks whether the **LAVA desktop app** is installed on the machine, using the same detection iLEAPP uses (`open -Ra LAVA` on macOS; the LAVA executable / known install paths on Windows and Linux):
 
-- **LAVA installed** → the button (**LAVA**) links to the local `.lava` file, which opens in LAVA through the OS file association.
-- **LAVA not installed** → the button becomes **Get LAVA** and links to the download page, `https://www.leapps.org/#lava` — exactly the GUI fallback.
+- **LAVA installed** → the button (**LAVA**) opens a small in-page dialog with the project's **full filesystem path** (resolved live from wherever the report currently sits, so it stays portable) and a **Copy** button, plus how to open it: paste into LAVA's *File ▸ Open*, double-click the `.lava` in your file manager, or `open "<path>"` on macOS/Linux. A "Download / open .lava" fallback is included.
+- **LAVA not installed** → the button becomes **Get LAVA**; the dialog shows the project path and a link to the download page, `https://www.leapps.org/#lava`.
 
-> **Browser limitation:** a web page can't directly launch a native app (the LEAPP GUIs can because they're Python apps calling the OS). LAVA also registers no `lava://` URL scheme. So when LAVA is installed and you click the button from a browser, the `.lava` is handed to the OS / downloaded and then opens in LAVA via its file association — not a single in-app jump. True one-click-into-LAVA from a link would require LAVA to register a `lava://` scheme.
+> **Why a dialog and not a direct launch?** A web page can't directly launch a native app (the LEAPP GUIs can because they're Python apps calling the OS), and LAVA registers no `lava://` URL scheme — a plain link would just download the `.lava`. The dialog avoids that surprise: it hands you the exact path to open in LAVA. True one-click-into-LAVA from a link would require LAVA to register a `lava://` scheme; if that ships, the button can link straight to it. The path is resolved client-side from `window.location`, so it's correct only when the index is opened from disk (`file://`) — the normal review workflow; served over `http`, the dialog falls back to the relative path.
 
 All links are **relative**, so the whole `OUTPUT_DIR` is portable — zip it, move it, or drop it on a share and the links still resolve. The report and LAVA files are located by scanning each output folder, so they're found wherever the tool writes them. If a tool doesn't emit a `.lava` file, that cell simply shows `—`.
 
