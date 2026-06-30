@@ -262,6 +262,30 @@ The same start/finish/elapsed times also appear in the master index header.
 
 ---
 
+## Input layout
+
+batch-leapp searches `INPUT_DIR` recursively, so you can arrange it however suits the case. The cleanest layout is **one folder per case or device**, holding just that extraction's archive:
+
+```
+Cases/                     ← point INPUT_DIR here
+├── 2024-001_iPhone15/
+│   └── extraction.zip
+├── 2024-002_Pixel8/
+│   └── fullfs.tar.gz
+└── 2024-003_iPadAir/
+    └── backup.zip
+```
+
+The top-level folder name (e.g. `2024-001_iPhone15`) becomes the **Source dir** column in the report index and manifest, so name it however you want runs grouped and identified.
+
+A couple of guidelines:
+
+- **Keep the output directory outside the input tree.** Point `OUTPUT_DIR` somewhere separate (or a sibling) so reports never land back inside what you're scanning.
+- **Don't mix prior LEAPP reports into the input.** batch-leapp already ignores `*LEAPP_Reports_*` folders, the output dir, and lone non-tar `.gz` files, but an input directory of *just extractions* is the safest setup and makes the `--dry-run` preview easy to sanity-check.
+- A flat folder of archives works too — they'll all share `INPUT_DIR`'s name as their Source dir.
+
+---
+
 ## Output layout
 
 ```
