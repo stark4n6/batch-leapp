@@ -539,12 +539,19 @@ function openLavaModal(rel){
   let h='';
   if(LAVA_INSTALLED){
     h+='<h2>Open in LAVA</h2>';
-    h+='<p>Your browser cannot launch LAVA directly. Open this project in LAVA one of these ways:</p>';
+    if(abs){
+      var lavaUrl='lava://open?path='+encodeURIComponent(abs);
+      h+='<p>Open this project directly in LAVA:</p>';
+      h+='<p><a class="btn lava" href="'+esc(lavaUrl)+'">Open in LAVA</a></p>';
+      h+='<p style="color:var(--muted);font-size:.82rem">Uses the <code>lava://</code> handler. '
+        +'If nothing happens, your LAVA version may not support it yet — open it manually below.</p>';
+    }else{
+      h+='<p>Your browser cannot launch LAVA directly. Open this project in LAVA one of these ways:</p>';
+    }
     h+='<ol><li>In LAVA choose <b>File &#9656; Open</b> and paste the path below, or</li>'
       +'<li>double-click the <code>.lava</code> file in your file manager.</li></ol>';
     h+=pathbox(shown);
     if(abs) h+='<p style="color:var(--muted);font-size:.82rem">macOS/Linux: run <code>open "'+esc(abs)+'"</code></p>';
-    h+='<p><a class="btn lava" href="'+rel+'" target="_blank" rel="noopener">Download / open .lava</a></p>';
   }else{
     h+='<h2>LAVA not installed</h2>';
     h+='<p>This report includes a LAVA project, but LAVA was not detected on this machine. '
