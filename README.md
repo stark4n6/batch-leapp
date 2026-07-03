@@ -123,6 +123,8 @@ open /Volumes/Cases/ios_reports/index.html
 | `--dry-run` | off | Print the exact commands without running the tool. |
 | `-- <args>` | — | Everything after a literal `--` is appended verbatim to every LEAPP run (e.g. `-- -p fast` for an iLEAPP profile). |
 
+> **Passing extra args:** batch-leapp owns `-o` (it gives each extraction its own output folder), so don't pass your own `-o` through `--` — it would send every report to the same place. To rename the report folder use iLEAPP's `--custom_output_folder` instead (e.g. `-- --custom_output_folder MyReports`); it renames the folder *inside* each per-zip output dir, so there's no collision and the index/manifest still find every report.
+
 ---
 
 ## Building standalone binaries
