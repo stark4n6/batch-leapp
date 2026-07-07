@@ -192,6 +192,18 @@ class BatchLeappGUI:
                   indicatorcolor=[("selected", ACCENT)], foreground=[("active", ACCENT)])
         style.configure("TSpinbox", fieldbackground=SURFACE2, foreground=TEXT,
                         arrowcolor=ACCENT, bordercolor=BORDER, padding=3)
+        style.configure("TCombobox", fieldbackground=SURFACE2, foreground=TEXT,
+                        background=SURFACE2, arrowcolor=ACCENT, bordercolor=BORDER,
+                        padding=3)
+        style.map("TCombobox",
+                  fieldbackground=[("readonly", SURFACE2)],
+                  foreground=[("disabled", MUTED)],
+                  bordercolor=[("focus", ACCENT)])
+        # The dropdown list is a plain Tk Listbox — theme it via the option DB.
+        self.root.option_add("*TCombobox*Listbox.background", SURFACE)
+        self.root.option_add("*TCombobox*Listbox.foreground", TEXT)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", OFF_BLACK)
 
     def _load_logo(self):
         """Build a PhotoImage of the batch-leapp icon. Prefers GUI_LOGO_DATA_URI,
@@ -244,7 +256,8 @@ class BatchLeappGUI:
         opts = ttk.Frame(frm)
         opts.grid(row=4, column=0, columnspan=3, sticky="we", **pad)
         ttk.Label(opts, text="Type").pack(side="left")
-        ttk.Entry(opts, textvariable=self.ftype, width=7).pack(side="left", padx=(4, 16))
+        ttk.Combobox(opts, textvariable=self.ftype, width=6,
+                     values=("auto", "zip", "tar", "gz")).pack(side="left", padx=(4, 16))
         ttk.Label(opts, text="Parallel jobs").pack(side="left")
         ttk.Spinbox(opts, from_=1, to=64, width=4, textvariable=self.jobs).pack(
             side="left", padx=(4, 16))
