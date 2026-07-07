@@ -1,16 +1,18 @@
-<img src="docs/icon.png" alt="Batch LEAPP icon" width="120" align="right">
-
 # batch_leapp.py
 
 [![Latest release](https://img.shields.io/github/v/release/abrignoni/batch-leapp)](https://github.com/abrignoni/batch-leapp/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/abrignoni/batch-leapp/total)](https://github.com/abrignoni/batch-leapp/releases)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey)
 
+<img src="docs/icon.png" alt="Batch LEAPP icon" width="110" align="right">
+
 Recursively find every `.zip` in a directory and run a **LEAPP** tool — [iLEAPP](https://github.com/abrignoni/iLEAPP), [ALEAPP](https://github.com/abrignoni/ALEAPP), [RLEAPP](https://github.com/abrignoni/RLEAPP), or [VLEAPP](https://github.com/abrignoni/VLEAPP) — on each one, producing a folder full of ready-to-review report directories plus a single master `index.html` that links them all.
 
 Point it at a directory of extractions, walk away, and come back to a review-ready set of LEAPP reports.
 
 > 📦 **[Download the latest release](https://github.com/abrignoni/batch-leapp/releases/latest)** — prebuilt macOS & Windows apps, no Python required.
+
+<br clear="right">
 
 <p align="center"><img src="docs/gui.png" alt="Batch LEAPP GUI running a batch" width="640"></p>
 
