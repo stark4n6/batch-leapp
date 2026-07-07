@@ -2,7 +2,7 @@
 """
 batch_leapp_gui.py — a small Tkinter front-end for batch_leapp.
 
-Pick an input directory of zips, an output directory, and a LEAPP tool (a .py
+Pick an input directory of extractions, an output directory, and a LEAPP tool (a .py
 script OR a compiled binary / macOS .app), then run the whole batch with a live
 log. Shares the exact engine the CLI uses (batch_leapp.run_batch).
 
@@ -244,9 +244,9 @@ class BatchLeappGUI:
         titles.pack(side="left", anchor="center")
         ttk.Label(titles, text="Batch LEAPP", style="Header.TLabel").pack(anchor="w")
         ttk.Label(titles, text="Run iLEAPP / ALEAPP / RLEAPP / VLEAPP across a "
-                              "folder of zips", style="Status.TLabel").pack(anchor="w")
+                              "folder of extractions", style="Status.TLabel").pack(anchor="w")
 
-        self._path_row(frm, 1, "Input dir (zips)", self.input_dir,
+        self._path_row(frm, 1, "Input dir (extractions)", self.input_dir,
                        self._pick_indir, "input_dirs")
         self._path_row(frm, 2, "Output dir", self.output_dir,
                        self._pick_outdir, "output_dirs")
@@ -331,7 +331,7 @@ class BatchLeappGUI:
 
     # ---- pickers ---------------------------------------------------------
     def _pick_indir(self):
-        d = filedialog.askdirectory(title="Input directory of zips")
+        d = filedialog.askdirectory(title="Input directory of extractions")
         if d:
             self.input_dir.set(d)
 
