@@ -27,7 +27,7 @@ fi
 if [ "$what" = "all" ] || [ "$what" = "gui" ]; then
     python3 -m PyInstaller --noconfirm --windowed --clean \
         --name "Batch LEAPP" \
-        --icon leapps.icns \
+        --icon batch-leapp.icns \
         --osx-bundle-identifier org.leapps.batch-leapp \
         batch_leapp_gui.py
 fi

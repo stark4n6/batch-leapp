@@ -31,14 +31,14 @@ goto cli
 :gui
 py -m PyInstaller --noconfirm --onefile --windowed --clean ^
     --name "Batch LEAPP" ^
-    --icon leapps.ico ^
+    --icon batch-leapp.ico ^
     batch_leapp_gui.py
 if "%WHAT%"=="gui" goto done
 
 :cli
 py -m PyInstaller --noconfirm --onefile --clean ^
     --name batch-leapp ^
-    --icon leapps.ico ^
+    --icon batch-leapp.ico ^
     batch_leapp.py
 
 :done

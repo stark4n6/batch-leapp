@@ -1,3 +1,5 @@
+<img src="docs/icon.png" alt="Batch LEAPP icon" width="120" align="right">
+
 # batch_leapp.py
 
 [![Latest release](https://img.shields.io/github/v/release/abrignoni/batch-leapp)](https://github.com/abrignoni/batch-leapp/releases/latest)
