@@ -9,9 +9,9 @@ Two responsibilities:
    the iLEAPP/ALEAPP repos), which write extractioninfo /
    installedappinventory / appfileinventory tables into each run's
    _lava_artifacts.db.
-   - iLEAPP has a --custom_artifacts_path CLI option, so the module is
-     enabled with extra arguments.
-   - ALEAPP has no such option yet, so the module is staged (copied) into
+   - When the tool supports --custom_artifacts_path (iLEAPP; ALEAPP since
+     PR #939) the module is enabled with extra arguments.
+   - Otherwise (older ALEAPP checkouts) the module is staged (copied) into
      scripts/artifacts/ for the duration of the batch and removed afterwards.
 
 2. aggregate(): after a batch (or standalone on any batch output folder),
@@ -84,10 +84,14 @@ def enable_coverage(leapp: Path, tool: str, log=print):
             "App Inventory module; inventory artifacts disabled.")
         return [], noop
 
-    if tool == "iLEAPP":
+    if _supports_custom_artifacts_path(leapp):
         return ["--custom_artifacts_path", str(alternate.parent)], noop
 
     if tool == "ALEAPP":
+        # Fallback for ALEAPP checkouts that predate --custom_artifacts_path
+        # (abrignoni/ALEAPP#939): stage the module for the batch.
+        log("coverage: this ALEAPP has no --custom_artifacts_path option, "
+            "staging the module instead.")
         staged = alternate.parent.parent / "artifacts" / alternate.name
         if staged.exists():
             log(f"coverage: {staged} already present, leaving it in place.")
@@ -103,9 +107,18 @@ def enable_coverage(leapp: Path, tool: str, log=print):
                 log(f"coverage: could not remove staged {staged}: {ex}")
         return [], cleanup
 
-    log(f"coverage: {tool} has no App Inventory module — inventory artifacts "
-        "disabled, aggregation will still run.")
+    log(f"coverage: {tool} does not support --custom_artifacts_path — "
+        "inventory artifacts disabled, aggregation will still run.")
     return [], noop
+
+
+def _supports_custom_artifacts_path(leapp: Path) -> bool:
+    """True when the LEAPP script accepts --custom_artifacts_path."""
+    try:
+        return "custom_artifacts_path" in leapp.read_text(encoding="utf-8",
+                                                          errors="replace")
+    except OSError:
+        return False
 
 
 # --------------------------------------------------------------------------

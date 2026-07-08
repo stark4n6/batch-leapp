@@ -145,10 +145,11 @@ python3 batch_leapp.py ~/test_images ~/reports --leapp ~/iLEAPP/ileapp.py --cove
 What it does:
 
 1. **Enables the App Inventory artifacts** (`scripts/alternate_artifacts/appInventory.py`
-   in the iLEAPP/ALEAPP source checkouts) for every run. For iLEAPP this uses
-   `--custom_artifacts_path`; ALEAPP has no such option yet, so the module is
-   staged into `scripts/artifacts/` for the duration of the batch and removed
-   afterwards. Normal (non-coverage) runs never see these artifacts.
+   in the iLEAPP/ALEAPP source checkouts) for every run, via each tool's
+   `--custom_artifacts_path` option. For ALEAPP checkouts that predate that
+   option the module is staged into `scripts/artifacts/` for the duration of
+   the batch and removed afterwards. Normal (non-coverage) runs never see
+   these artifacts.
 2. **Aggregates every report** into `batch_apps.sqlite` at the output root:
    per-extraction device identifiers (`extractions`), installed apps
    (`installed_apps`), every file mapped to its owning app (`app_files`), and
