@@ -337,7 +337,7 @@ def _map_path_to_app(path, tool, uuid_map):
     return ""
 
 
-def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row, log):
+def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
     lava_db = report_dir / "_lava_artifacts.db"
     con = sqlite3.connect(f"file:{lava_db}?mode=ro", uri=True)
     try:
@@ -583,7 +583,7 @@ def aggregate(output_dir, log=print):
         dest_name = rel.parts[0] if rel.parts else report_dir.name
         try:
             _ingest_report(out_con, extraction_id, report_dir, dest_name,
-                           manifest.get(dest_name, {}), log)
+                           manifest.get(dest_name, {}))
             count += 1
         except sqlite3.Error as ex:
             log(f"coverage: skipped {report_dir} ({ex})")
