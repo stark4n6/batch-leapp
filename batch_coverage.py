@@ -27,13 +27,18 @@ Standalone usage (re-aggregate an existing batch output directory):
 
 import argparse
 import json
+import platform
 import re
 import shutil
 import sqlite3
 import sys
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 COVERAGE_DB_NAME = "batch_apps.sqlite"
+LAVA_SIDECAR_NAME = "batch_apps.lava"
+COVERAGE_VERSION = "1.0"
 INVENTORY_MODULE = "appInventory"
 
 # Android package-owned locations (mirrors the ALEAPP inventory artifact).
@@ -431,6 +436,127 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row, 
     return True
 
 
+# --------------------------------------------------------------------------
+# LAVA project sidecar (makes batch_apps.sqlite openable in LAVA)
+# --------------------------------------------------------------------------
+
+# Materialized copies of the views, enriched with the extraction name so the
+# LAVA grid is useful standalone. LAVA reads concrete tables, not views.
+_LAVA_MATERIALIZE = (
+    ("apps_not_parsed", "SELECT * FROM v_apps_not_parsed"),
+    ("apps_not_parsed_rollup", "SELECT * FROM v_apps_not_parsed_rollup"),
+    ("app_coverage",
+     "SELECT e.tool, e.input_name, c.* FROM v_app_coverage c"
+     " JOIN extractions e ON e.extraction_id = c.extraction_id"
+     " ORDER BY e.input_name, c.app_id"),
+    ("module_app_spread",
+     "SELECT e.tool, e.input_name, s.* FROM v_module_app_spread s"
+     " JOIN extractions e ON e.extraction_id = s.extraction_id"
+     " ORDER BY s.apps_matched DESC"),
+    ("unknown_containers", "SELECT * FROM v_unknown_containers"),
+)
+
+# Artifacts exposed to LAVA: (table, display name, description, tabler icon,
+# {column: lava type}) — 'datetime' columns render as timestamps in LAVA.
+_LAVA_ARTIFACTS = (
+    ("apps_not_parsed_rollup", "Apps Not Parsed - Rollup",
+     "Apps with data on disk that no app-specific module touched, ranked "
+     "across all extractions. The headline coverage view.", "flag", {}),
+    ("apps_not_parsed", "Apps Not Parsed - Per Extraction",
+     "Apps with data on disk that no app-specific module touched, per "
+     "extraction.", "flag-off", {}),
+    ("app_coverage", "App Coverage",
+     "Every app per extraction with files on disk, files matched by any "
+     "module, and files matched by app-specific modules only.", "chart-bar", {}),
+    ("module_app_spread", "Module App Spread",
+     "How many different apps each module matched files for. Modules at 10+ "
+     "are classified generic and do not count as parsing an app.", "topology-star", {}),
+    ("unknown_containers", "Unknown Containers",
+     "App containers whose owner could not be identified (likely uninstalled "
+     "apps); their bundle ID is unknown.", "zoom-question", {}),
+    ("extractions", "Extractions",
+     "One row per processed input: tool version, device identifiers and "
+     "input archive.", "device-mobile", {}),
+    ("installed_apps", "Installed Apps",
+     "Installed application inventory across all extractions.", "package",
+     {"install_time": "datetime", "update_time": "datetime"}),
+    ("app_files", "App Files",
+     "Every file in every extraction, mapped to its owning app when "
+     "applicable.", "files", {}),
+    ("artifact_files", "Artifact Matched Files",
+     "Files matched by LEAPP module search patterns (inventory module "
+     "excluded), resolved to their owning app.", "search", {}),
+)
+
+_COLUMN_LABEL_OVERRIDES = {
+    "app_id": "App ID", "os_version": "OS Version", "sha256": "SHA-256",
+    "container_uuid": "Container UUID", "input_name": "Input Name",
+    "extraction_id": "Extraction ID", "in_inventory": "In Inventory",
+    "is_generic": "Is Generic", "tool": "Tool",
+}
+
+
+def _column_label(column):
+    return _COLUMN_LABEL_OVERRIDES.get(column, column.replace("_", " ").title())
+
+
+def _write_lava_sidecar(out_con, output_dir, log=print):
+    """Materialize the coverage views and write batch_apps.lava so the
+    aggregate database opens as a project in LAVA."""
+    for table, select_sql in _LAVA_MATERIALIZE:
+        out_con.execute(f"DROP TABLE IF EXISTS {table}")
+        out_con.execute(f"CREATE TABLE {table} AS {select_sql}")
+    out_con.commit()
+
+    artifacts = OrderedDict()
+    module_meta = {"module_name": "batch_coverage",
+                   "module_filename": "batch_coverage.py", "artifacts": []}
+    category = "Batch Coverage"
+    artifacts[category] = []
+    for table, name, description, icon, special in _LAVA_ARTIFACTS:
+        columns = _columns(out_con, table)
+        record_count = out_con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        artifacts[category].append({
+            "name": name,
+            "tablename": table,
+            "module": "batch_coverage",
+            "column_map": {c: _column_label(c) for c in columns},
+            "artifact_icon": icon,
+            "record_count": record_count,
+            "object_columns": [{"name": c, "type": t} for c, t in special.items()],
+        })
+        module_meta["artifacts"].append({
+            "artifact_key": table, "tablename": table, "name": name,
+            "description": description, "author": "batch-leapp",
+            "created_date": "", "last_updated_date": "", "notes": "",
+            "category": category,
+        })
+
+    lava_data = {
+        "parser_info": {
+            "leapp_name": "batch-leapp",
+            "leapp_version": COVERAGE_VERSION,
+            "leapp_mode": "CLI",
+            "package": "Source code",
+            "OS": platform.platform(),
+            "start_timestamp": int(time.time()),
+        },
+        "param_input": str(output_dir),
+        "param_output": str(output_dir),
+        "param_type": "coverage-aggregate",
+        "processing_status": "Complete",
+        "lava_db_name": COVERAGE_DB_NAME,
+        "modules": [{"module_name": "batch_coverage", "module_status": "completed"}],
+        "artifacts": artifacts,
+        "meta": {"modules": [module_meta]},
+    }
+    sidecar = output_dir / LAVA_SIDECAR_NAME
+    with open(sidecar, "w", encoding="utf-8") as f:
+        json.dump(lava_data, f, indent=2)
+    log(f"coverage: wrote LAVA project file {sidecar} (open it in LAVA)")
+    return sidecar
+
+
 def aggregate(output_dir, log=print):
     """Merge every report under output_dir into batch_apps.sqlite.
 
@@ -467,6 +593,7 @@ def aggregate(output_dir, log=print):
     unparsed = out_con.execute("SELECT COUNT(*) FROM v_apps_not_parsed").fetchone()[0]
     with_inventory = out_con.execute(
         "SELECT COUNT(*) FROM extractions WHERE has_inventory = 1").fetchone()[0]
+    _write_lava_sidecar(out_con, output_dir, log)
     out_con.close()
 
     log(f"coverage: aggregated {count} extraction(s) "
