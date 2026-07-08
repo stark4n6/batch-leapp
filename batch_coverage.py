@@ -166,6 +166,7 @@ CREATE TABLE installed_apps (
 CREATE TABLE app_files (
     extraction_id INTEGER,
     app_id        TEXT,
+    owner_app_id  TEXT,
     location_type TEXT,
     container_uuid TEXT,
     file_path     TEXT,
@@ -183,11 +184,21 @@ CREATE TABLE artifact_files (
     extraction_id INTEGER,
     file_path     TEXT,
     app_id        TEXT,   -- resolved by the aggregator
+    owner_app_id  TEXT,
     module_name   TEXT    -- one row per (file, matching module)
 );
+-- group containers (group.com.x) and app extensions (com.x.SomeExtension)
+-- folded into the app that owns them; coverage is computed on owner_app_id
+CREATE TABLE app_aliases (
+    extraction_id INTEGER,
+    app_id        TEXT,
+    owner_app_id  TEXT
+);
 CREATE INDEX idx_app_files ON app_files(extraction_id, app_id);
-CREATE INDEX idx_artifact_files ON artifact_files(extraction_id, app_id);
+CREATE INDEX idx_app_files_owner ON app_files(extraction_id, owner_app_id);
+CREATE INDEX idx_artifact_files ON artifact_files(extraction_id, owner_app_id);
 CREATE INDEX idx_installed ON installed_apps(extraction_id, app_id);
+CREATE INDEX idx_aliases ON app_aliases(extraction_id, app_id);
 
 -- How many different apps each module matched files for, per extraction.
 -- Modules that touch many apps (userDefaults, appGrouplisting, packageInfo,
@@ -196,10 +207,10 @@ CREATE INDEX idx_installed ON installed_apps(extraction_id, app_id);
 -- not make an app count as parsed.
 CREATE VIEW v_module_app_spread AS
 SELECT extraction_id, module_name,
-       COUNT(DISTINCT app_id) AS apps_matched,
-       COUNT(DISTINCT app_id) >= 10 AS is_generic
+       COUNT(DISTINCT owner_app_id) AS apps_matched,
+       COUNT(DISTINCT owner_app_id) >= 10 AS is_generic
 FROM artifact_files
-WHERE app_id != ''
+WHERE owner_app_id != ''
 GROUP BY extraction_id, module_name;
 
 -- one row per (extraction, app) with disk/matched file counts.
@@ -208,20 +219,28 @@ GROUP BY extraction_id, module_name;
 CREATE VIEW v_app_coverage AS
 SELECT u.extraction_id, u.app_id,
        (SELECT COUNT(*) FROM app_files f
-         WHERE f.extraction_id = u.extraction_id AND f.app_id = u.app_id) AS files_on_disk,
+         WHERE f.extraction_id = u.extraction_id AND f.owner_app_id = u.app_id) AS files_on_disk,
        (SELECT COUNT(DISTINCT m.file_path) FROM artifact_files m
-         WHERE m.extraction_id = u.extraction_id AND m.app_id = u.app_id) AS files_matched,
+         WHERE m.extraction_id = u.extraction_id AND m.owner_app_id = u.app_id) AS files_matched,
        (SELECT COUNT(DISTINCT m.file_path) FROM artifact_files m
          JOIN v_module_app_spread s
               ON s.extraction_id = m.extraction_id
              AND s.module_name = m.module_name
-         WHERE m.extraction_id = u.extraction_id AND m.app_id = u.app_id
+         WHERE m.extraction_id = u.extraction_id AND m.owner_app_id = u.app_id
            AND s.is_generic = 0) AS files_matched_specific,
        EXISTS (SELECT 1 FROM installed_apps i
-         WHERE i.extraction_id = u.extraction_id AND i.app_id = u.app_id) AS in_inventory
-FROM (SELECT DISTINCT extraction_id, app_id FROM app_files WHERE app_id != ''
+                LEFT JOIN app_aliases al ON al.extraction_id = i.extraction_id
+                                        AND al.app_id = i.app_id
+         WHERE i.extraction_id = u.extraction_id
+           AND COALESCE(al.owner_app_id, i.app_id) = u.app_id) AS in_inventory
+FROM (SELECT DISTINCT extraction_id, owner_app_id AS app_id
+        FROM app_files WHERE owner_app_id != ''
       UNION
-      SELECT DISTINCT extraction_id, app_id FROM installed_apps WHERE app_id != '') u;
+      SELECT DISTINCT i.extraction_id, COALESCE(al.owner_app_id, i.app_id)
+        FROM installed_apps i
+        LEFT JOIN app_aliases al ON al.extraction_id = i.extraction_id
+                                AND al.app_id = i.app_id
+        WHERE i.app_id != '') u;
 
 -- apps with data on disk that no app-specific artifact touched
 CREATE VIEW v_apps_not_parsed AS
@@ -399,8 +418,8 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
                     f"SELECT {id_col}, {type_col}, {uuid_expr}, file_path,"
                     " file_size, modified_time FROM appfileinventory"):
                 out_con.execute(
-                    "INSERT INTO app_files VALUES (?,?,?,?,?,?,?)",
-                    (extraction_id, app_id, ltype, cuuid,
+                    "INSERT INTO app_files VALUES (?,?,?,?,?,?,?,?)",
+                    (extraction_id, app_id, app_id, ltype, cuuid,
                      _norm_path(fpath, input_path), fsize, mtime))
                 if cuuid and app_id:
                     uuid_map.setdefault(cuuid.upper(), app_id)
@@ -427,13 +446,64 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
                 if (norm, module) in seen:
                     continue
                 seen.add((norm, module))
+                app_id = _map_path_to_app(norm, tool, uuid_map)
                 out_con.execute(
-                    "INSERT INTO artifact_files VALUES (?,?,?,?)",
-                    (extraction_id, norm,
-                     _map_path_to_app(norm, tool, uuid_map), module))
+                    "INSERT INTO artifact_files VALUES (?,?,?,?,?)",
+                    (extraction_id, norm, app_id, app_id, module))
     finally:
         con.close()
     return True
+
+
+def _resolve_owner_apps(out_con, log=print):
+    """Fold shared group containers and app extensions into their owning app.
+
+    On iOS the forensically interesting data of many apps lives in shared
+    group containers (group.com.kik.chat) or extension containers
+    (com.x.Messenger.NotificationServiceExtension), which carry their own
+    identifier. Without folding, an app looks unparsed even though its group
+    container was parsed. Owner = the installed app (bundle/data/apk
+    container) whose bundle id is the longest dot-boundary prefix of the
+    identifier (after stripping a leading 'group.').
+    """
+    aliases = 0
+    for (extraction_id,) in out_con.execute(
+            "SELECT extraction_id FROM extractions").fetchall():
+        owners = [r[0] for r in out_con.execute(
+            "SELECT DISTINCT app_id FROM installed_apps WHERE extraction_id = ?"
+            " AND location_type IN ('bundle', 'data', 'apk') AND app_id != ''",
+            (extraction_id,))]
+        owners.sort(key=len, reverse=True)   # longest prefix wins
+        owner_set = set(owners)
+        candidates = {r[0] for r in out_con.execute(
+            "SELECT DISTINCT app_id FROM app_files WHERE extraction_id = ?"
+            " AND app_id != '' UNION SELECT DISTINCT app_id FROM installed_apps"
+            " WHERE extraction_id = ? AND app_id != ''",
+            (extraction_id, extraction_id))}
+        for candidate in candidates:
+            if candidate in owner_set:
+                continue
+            base = candidate[6:] if candidate.startswith("group.") else candidate
+            for owner in owners:
+                if base == owner or base.startswith(owner + "."):
+                    out_con.execute(
+                        "INSERT INTO app_aliases VALUES (?,?,?)",
+                        (extraction_id, candidate, owner))
+                    aliases += 1
+                    break
+    for table in ("app_files", "artifact_files"):
+        out_con.execute(f"""
+            UPDATE {table} SET owner_app_id = (
+                SELECT al.owner_app_id FROM app_aliases al
+                WHERE al.extraction_id = {table}.extraction_id
+                  AND al.app_id = {table}.app_id)
+            WHERE EXISTS (
+                SELECT 1 FROM app_aliases al
+                WHERE al.extraction_id = {table}.extraction_id
+                  AND al.app_id = {table}.app_id)""")
+    out_con.commit()
+    log(f"coverage: folded {aliases} group/extension identifier(s) into "
+        "their owning apps")
 
 
 # --------------------------------------------------------------------------
@@ -588,6 +658,7 @@ def aggregate(output_dir, log=print):
         except sqlite3.Error as ex:
             log(f"coverage: skipped {report_dir} ({ex})")
     out_con.commit()
+    _resolve_owner_apps(out_con, log)
 
     apps = out_con.execute("SELECT COUNT(DISTINCT app_id) FROM v_app_coverage").fetchone()[0]
     unparsed = out_con.execute("SELECT COUNT(*) FROM v_apps_not_parsed").fetchone()[0]
