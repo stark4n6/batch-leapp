@@ -57,6 +57,9 @@ The `--coverage` flag does two things:
 1. **Turns on the App Inventory artifacts** for every run (via the LEAPPs' `--custom_artifacts_path` option — no changes to your checkout, nothing left behind).
 2. **Aggregates everything at the end** into a single `batch_apps.sqlite` at the output root, with views that answer the question directly — plus a `batch_apps.lava` file so you can open the whole thing in LAVA and browse it like any other project.
 
+![Master index with the App Coverage Analysis button](images/index_coverage_button.png)
+*The master index of my five-image iOS batch. The gold button at the top opens the coverage analysis in LAVA; every row also links its own report and LAVA project.*
+
 Already ran a batch and just want to rebuild the analysis? No need to reparse anything:
 
 ```

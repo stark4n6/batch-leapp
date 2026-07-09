@@ -21,10 +21,16 @@ Also remember what parsed does NOT mean: it does not mean parsed *well*. One mat
 
 **1. Coverage Summary** — the scoreboard. One row per image: device, OS version, apps present, apps parsed, percent covered, and how many files were inventoried. On my five iOS test images the numbers run 1.6% to 3.3% of installed apps parsed by app-specific modules. Before you gasp — most of the 800 apps on any phone are keyboards, stickers, and single-purpose junk nobody will ever write a module for. The percentage isn't the point. The point is what's IN the unparsed list.
 
+![Coverage Summary in LAVA](images/lava_coverage_summary.png)
+*Coverage Summary in LAVA: one row per image with the parsed/not-parsed scoreboard.*
+
 **2. Apps Not Parsed - Rollup** — the target list, and the reason this whole thing exists. One row per app across ALL your images: how many images it appears in, how many it went unparsed in, and total files on disk. Sort by files on disk, descending. In my corpus the top of that list was Snapchat (unparsed in 5 of 5 images, 29k files sitting there), Facebook (4 of 4), Twitter, and YouTube. That's a module-writing roadmap, ranked by evidence volume.
 
 ![Top unparsed apps](images/chart_top_unparsed.png)
 *The rollup from my five-image iOS corpus, ranked by evidence volume.*
+
+![Apps Not Parsed - Rollup in LAVA](images/lava_apps_not_parsed.png)
+*The rollup in LAVA, sorted by Total Files On Disk. Gmail, Numbers, Snapchat, Chrome — the target list, one click away.*
 
 **3. Apps Not Parsed - Per Extraction** — the same thing, image by image. This is where the interesting nuances live. Instagram showed up in all five of my images but was unparsed in only one — meaning the existing modules work, but something about that one image (app version? migration? new path?) broke pattern matching. That's a bug report waiting to be filed, and it's a different kind of finding than "no module exists."
 
