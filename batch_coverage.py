@@ -27,13 +27,18 @@ Standalone usage (re-aggregate an existing batch output directory):
 
 import argparse
 import json
+import platform
 import re
 import shutil
 import sqlite3
 import sys
+import time
+from collections import OrderedDict
 from pathlib import Path
 
 COVERAGE_DB_NAME = "batch_apps.sqlite"
+LAVA_SIDECAR_NAME = "batch_apps.lava"
+COVERAGE_VERSION = "1.0"
 INVENTORY_MODULE = "appInventory"
 
 # Android package-owned locations (mirrors the ALEAPP inventory artifact).
@@ -161,6 +166,7 @@ CREATE TABLE installed_apps (
 CREATE TABLE app_files (
     extraction_id INTEGER,
     app_id        TEXT,
+    owner_app_id  TEXT,
     location_type TEXT,
     container_uuid TEXT,
     file_path     TEXT,
@@ -178,11 +184,21 @@ CREATE TABLE artifact_files (
     extraction_id INTEGER,
     file_path     TEXT,
     app_id        TEXT,   -- resolved by the aggregator
+    owner_app_id  TEXT,
     module_name   TEXT    -- one row per (file, matching module)
 );
+-- group containers (group.com.x) and app extensions (com.x.SomeExtension)
+-- folded into the app that owns them; coverage is computed on owner_app_id
+CREATE TABLE app_aliases (
+    extraction_id INTEGER,
+    app_id        TEXT,
+    owner_app_id  TEXT
+);
 CREATE INDEX idx_app_files ON app_files(extraction_id, app_id);
-CREATE INDEX idx_artifact_files ON artifact_files(extraction_id, app_id);
+CREATE INDEX idx_app_files_owner ON app_files(extraction_id, owner_app_id);
+CREATE INDEX idx_artifact_files ON artifact_files(extraction_id, owner_app_id);
 CREATE INDEX idx_installed ON installed_apps(extraction_id, app_id);
+CREATE INDEX idx_aliases ON app_aliases(extraction_id, app_id);
 
 -- How many different apps each module matched files for, per extraction.
 -- Modules that touch many apps (userDefaults, appGrouplisting, packageInfo,
@@ -191,10 +207,10 @@ CREATE INDEX idx_installed ON installed_apps(extraction_id, app_id);
 -- not make an app count as parsed.
 CREATE VIEW v_module_app_spread AS
 SELECT extraction_id, module_name,
-       COUNT(DISTINCT app_id) AS apps_matched,
-       COUNT(DISTINCT app_id) >= 10 AS is_generic
+       COUNT(DISTINCT owner_app_id) AS apps_matched,
+       COUNT(DISTINCT owner_app_id) >= 10 AS is_generic
 FROM artifact_files
-WHERE app_id != ''
+WHERE owner_app_id != ''
 GROUP BY extraction_id, module_name;
 
 -- one row per (extraction, app) with disk/matched file counts.
@@ -203,20 +219,28 @@ GROUP BY extraction_id, module_name;
 CREATE VIEW v_app_coverage AS
 SELECT u.extraction_id, u.app_id,
        (SELECT COUNT(*) FROM app_files f
-         WHERE f.extraction_id = u.extraction_id AND f.app_id = u.app_id) AS files_on_disk,
+         WHERE f.extraction_id = u.extraction_id AND f.owner_app_id = u.app_id) AS files_on_disk,
        (SELECT COUNT(DISTINCT m.file_path) FROM artifact_files m
-         WHERE m.extraction_id = u.extraction_id AND m.app_id = u.app_id) AS files_matched,
+         WHERE m.extraction_id = u.extraction_id AND m.owner_app_id = u.app_id) AS files_matched,
        (SELECT COUNT(DISTINCT m.file_path) FROM artifact_files m
          JOIN v_module_app_spread s
               ON s.extraction_id = m.extraction_id
              AND s.module_name = m.module_name
-         WHERE m.extraction_id = u.extraction_id AND m.app_id = u.app_id
+         WHERE m.extraction_id = u.extraction_id AND m.owner_app_id = u.app_id
            AND s.is_generic = 0) AS files_matched_specific,
        EXISTS (SELECT 1 FROM installed_apps i
-         WHERE i.extraction_id = u.extraction_id AND i.app_id = u.app_id) AS in_inventory
-FROM (SELECT DISTINCT extraction_id, app_id FROM app_files WHERE app_id != ''
+                LEFT JOIN app_aliases al ON al.extraction_id = i.extraction_id
+                                        AND al.app_id = i.app_id
+         WHERE i.extraction_id = u.extraction_id
+           AND COALESCE(al.owner_app_id, i.app_id) = u.app_id) AS in_inventory
+FROM (SELECT DISTINCT extraction_id, owner_app_id AS app_id
+        FROM app_files WHERE owner_app_id != ''
       UNION
-      SELECT DISTINCT extraction_id, app_id FROM installed_apps WHERE app_id != '') u;
+      SELECT DISTINCT i.extraction_id, COALESCE(al.owner_app_id, i.app_id)
+        FROM installed_apps i
+        LEFT JOIN app_aliases al ON al.extraction_id = i.extraction_id
+                                AND al.app_id = i.app_id
+        WHERE i.app_id != '') u;
 
 -- apps with data on disk that no app-specific artifact touched
 CREATE VIEW v_apps_not_parsed AS
@@ -332,7 +356,7 @@ def _map_path_to_app(path, tool, uuid_map):
     return ""
 
 
-def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row, log):
+def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
     lava_db = report_dir / "_lava_artifacts.db"
     con = sqlite3.connect(f"file:{lava_db}?mode=ro", uri=True)
     try:
@@ -394,8 +418,8 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row, 
                     f"SELECT {id_col}, {type_col}, {uuid_expr}, file_path,"
                     " file_size, modified_time FROM appfileinventory"):
                 out_con.execute(
-                    "INSERT INTO app_files VALUES (?,?,?,?,?,?,?)",
-                    (extraction_id, app_id, ltype, cuuid,
+                    "INSERT INTO app_files VALUES (?,?,?,?,?,?,?,?)",
+                    (extraction_id, app_id, app_id, ltype, cuuid,
                      _norm_path(fpath, input_path), fsize, mtime))
                 if cuuid and app_id:
                     uuid_map.setdefault(cuuid.upper(), app_id)
@@ -422,13 +446,185 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row, 
                 if (norm, module) in seen:
                     continue
                 seen.add((norm, module))
+                app_id = _map_path_to_app(norm, tool, uuid_map)
                 out_con.execute(
-                    "INSERT INTO artifact_files VALUES (?,?,?,?)",
-                    (extraction_id, norm,
-                     _map_path_to_app(norm, tool, uuid_map), module))
+                    "INSERT INTO artifact_files VALUES (?,?,?,?,?)",
+                    (extraction_id, norm, app_id, app_id, module))
     finally:
         con.close()
     return True
+
+
+def _resolve_owner_apps(out_con, log=print):
+    """Fold shared group containers and app extensions into their owning app.
+
+    On iOS the forensically interesting data of many apps lives in shared
+    group containers (group.com.kik.chat) or extension containers
+    (com.x.Messenger.NotificationServiceExtension), which carry their own
+    identifier. Without folding, an app looks unparsed even though its group
+    container was parsed. Owner = the installed app (bundle/data/apk
+    container) whose bundle id is the longest dot-boundary prefix of the
+    identifier (after stripping a leading 'group.').
+    """
+    aliases = 0
+    for (extraction_id,) in out_con.execute(
+            "SELECT extraction_id FROM extractions").fetchall():
+        owners = [r[0] for r in out_con.execute(
+            "SELECT DISTINCT app_id FROM installed_apps WHERE extraction_id = ?"
+            " AND location_type IN ('bundle', 'data', 'apk') AND app_id != ''",
+            (extraction_id,))]
+        owners.sort(key=len, reverse=True)   # longest prefix wins
+        owner_set = set(owners)
+        candidates = {r[0] for r in out_con.execute(
+            "SELECT DISTINCT app_id FROM app_files WHERE extraction_id = ?"
+            " AND app_id != '' UNION SELECT DISTINCT app_id FROM installed_apps"
+            " WHERE extraction_id = ? AND app_id != ''",
+            (extraction_id, extraction_id))}
+        for candidate in candidates:
+            if candidate in owner_set:
+                continue
+            base = candidate[6:] if candidate.startswith("group.") else candidate
+            for owner in owners:
+                if base == owner or base.startswith(owner + "."):
+                    out_con.execute(
+                        "INSERT INTO app_aliases VALUES (?,?,?)",
+                        (extraction_id, candidate, owner))
+                    aliases += 1
+                    break
+    for table in ("app_files", "artifact_files"):
+        out_con.execute(f"""
+            UPDATE {table} SET owner_app_id = (
+                SELECT al.owner_app_id FROM app_aliases al
+                WHERE al.extraction_id = {table}.extraction_id
+                  AND al.app_id = {table}.app_id)
+            WHERE EXISTS (
+                SELECT 1 FROM app_aliases al
+                WHERE al.extraction_id = {table}.extraction_id
+                  AND al.app_id = {table}.app_id)""")
+    out_con.commit()
+    log(f"coverage: folded {aliases} group/extension identifier(s) into "
+        "their owning apps")
+
+
+# --------------------------------------------------------------------------
+# LAVA project sidecar (makes batch_apps.sqlite openable in LAVA)
+# --------------------------------------------------------------------------
+
+# Materialized copies of the views, enriched with the extraction name so the
+# LAVA grid is useful standalone. LAVA reads concrete tables, not views.
+_LAVA_MATERIALIZE = (
+    ("apps_not_parsed", "SELECT * FROM v_apps_not_parsed"),
+    ("apps_not_parsed_rollup", "SELECT * FROM v_apps_not_parsed_rollup"),
+    ("app_coverage",
+     "SELECT e.tool, e.input_name, c.* FROM v_app_coverage c"
+     " JOIN extractions e ON e.extraction_id = c.extraction_id"
+     " ORDER BY e.input_name, c.app_id"),
+    ("module_app_spread",
+     "SELECT e.tool, e.input_name, s.* FROM v_module_app_spread s"
+     " JOIN extractions e ON e.extraction_id = s.extraction_id"
+     " ORDER BY s.apps_matched DESC"),
+    ("unknown_containers", "SELECT * FROM v_unknown_containers"),
+)
+
+# Artifacts exposed to LAVA: (table, display name, description, tabler icon,
+# {column: lava type}) — 'datetime' columns render as timestamps in LAVA.
+_LAVA_ARTIFACTS = (
+    ("apps_not_parsed_rollup", "Apps Not Parsed - Rollup",
+     "Apps with data on disk that no app-specific module touched, ranked "
+     "across all extractions. The headline coverage view.", "flag", {}),
+    ("apps_not_parsed", "Apps Not Parsed - Per Extraction",
+     "Apps with data on disk that no app-specific module touched, per "
+     "extraction.", "flag-off", {}),
+    ("app_coverage", "App Coverage",
+     "Every app per extraction with files on disk, files matched by any "
+     "module, and files matched by app-specific modules only.", "chart-bar", {}),
+    ("module_app_spread", "Module App Spread",
+     "How many different apps each module matched files for. Modules at 10+ "
+     "are classified generic and do not count as parsing an app.", "topology-star", {}),
+    ("unknown_containers", "Unknown Containers",
+     "App containers whose owner could not be identified (likely uninstalled "
+     "apps); their bundle ID is unknown.", "zoom-question", {}),
+    ("extractions", "Extractions",
+     "One row per processed input: tool version, device identifiers and "
+     "input archive.", "device-mobile", {}),
+    ("installed_apps", "Installed Apps",
+     "Installed application inventory across all extractions.", "package",
+     {"install_time": "datetime", "update_time": "datetime"}),
+    ("app_files", "App Files",
+     "Every file in every extraction, mapped to its owning app when "
+     "applicable.", "files", {}),
+    ("artifact_files", "Artifact Matched Files",
+     "Files matched by LEAPP module search patterns (inventory module "
+     "excluded), resolved to their owning app.", "search", {}),
+)
+
+_COLUMN_LABEL_OVERRIDES = {
+    "app_id": "App ID", "os_version": "OS Version", "sha256": "SHA-256",
+    "container_uuid": "Container UUID", "input_name": "Input Name",
+    "extraction_id": "Extraction ID", "in_inventory": "In Inventory",
+    "is_generic": "Is Generic", "tool": "Tool",
+}
+
+
+def _column_label(column):
+    return _COLUMN_LABEL_OVERRIDES.get(column, column.replace("_", " ").title())
+
+
+def _write_lava_sidecar(out_con, output_dir, log=print):
+    """Materialize the coverage views and write batch_apps.lava so the
+    aggregate database opens as a project in LAVA."""
+    for table, select_sql in _LAVA_MATERIALIZE:
+        out_con.execute(f"DROP TABLE IF EXISTS {table}")
+        out_con.execute(f"CREATE TABLE {table} AS {select_sql}")
+    out_con.commit()
+
+    artifacts = OrderedDict()
+    module_meta = {"module_name": "batch_coverage",
+                   "module_filename": "batch_coverage.py", "artifacts": []}
+    category = "Batch Coverage"
+    artifacts[category] = []
+    for table, name, description, icon, special in _LAVA_ARTIFACTS:
+        columns = _columns(out_con, table)
+        record_count = out_con.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        artifacts[category].append({
+            "name": name,
+            "tablename": table,
+            "module": "batch_coverage",
+            "column_map": {c: _column_label(c) for c in columns},
+            "artifact_icon": icon,
+            "record_count": record_count,
+            "object_columns": [{"name": c, "type": t} for c, t in special.items()],
+        })
+        module_meta["artifacts"].append({
+            "artifact_key": table, "tablename": table, "name": name,
+            "description": description, "author": "batch-leapp",
+            "created_date": "", "last_updated_date": "", "notes": "",
+            "category": category,
+        })
+
+    lava_data = {
+        "parser_info": {
+            "leapp_name": "batch-leapp",
+            "leapp_version": COVERAGE_VERSION,
+            "leapp_mode": "CLI",
+            "package": "Source code",
+            "OS": platform.platform(),
+            "start_timestamp": int(time.time()),
+        },
+        "param_input": str(output_dir),
+        "param_output": str(output_dir),
+        "param_type": "coverage-aggregate",
+        "processing_status": "Complete",
+        "lava_db_name": COVERAGE_DB_NAME,
+        "modules": [{"module_name": "batch_coverage", "module_status": "completed"}],
+        "artifacts": artifacts,
+        "meta": {"modules": [module_meta]},
+    }
+    sidecar = output_dir / LAVA_SIDECAR_NAME
+    with open(sidecar, "w", encoding="utf-8") as f:
+        json.dump(lava_data, f, indent=2)
+    log(f"coverage: wrote LAVA project file {sidecar} (open it in LAVA)")
+    return sidecar
 
 
 def aggregate(output_dir, log=print):
@@ -457,16 +653,18 @@ def aggregate(output_dir, log=print):
         dest_name = rel.parts[0] if rel.parts else report_dir.name
         try:
             _ingest_report(out_con, extraction_id, report_dir, dest_name,
-                           manifest.get(dest_name, {}), log)
+                           manifest.get(dest_name, {}))
             count += 1
         except sqlite3.Error as ex:
             log(f"coverage: skipped {report_dir} ({ex})")
     out_con.commit()
+    _resolve_owner_apps(out_con, log)
 
     apps = out_con.execute("SELECT COUNT(DISTINCT app_id) FROM v_app_coverage").fetchone()[0]
     unparsed = out_con.execute("SELECT COUNT(*) FROM v_apps_not_parsed").fetchone()[0]
     with_inventory = out_con.execute(
         "SELECT COUNT(*) FROM extractions WHERE has_inventory = 1").fetchone()[0]
+    _write_lava_sidecar(out_con, output_dir, log)
     out_con.close()
 
     log(f"coverage: aggregated {count} extraction(s) "
