@@ -57,6 +57,9 @@ The `--coverage` flag does two things:
 1. **Turns on the App Inventory artifacts** for every run (via the LEAPPs' `--custom_artifacts_path` option — no changes to your checkout, nothing left behind).
 2. **Aggregates everything at the end** into a single `batch_apps.sqlite` at the output root, with views that answer the question directly — plus a `batch_apps.lava` file so you can open the whole thing in LAVA and browse it like any other project.
 
+![Master index with the App Coverage Analysis button](images/index_coverage_button.png)
+*The master index of my five-image iOS batch. The gold button at the top opens the coverage analysis in LAVA; every row also links its own report and LAVA project.*
+
 Already ran a batch and just want to rebuild the analysis? No need to reparse anything:
 
 ```
@@ -68,6 +71,9 @@ A few practical notes:
 - Coverage needs **source checkouts** of iLEAPP/ALEAPP (the compiled binaries don't bundle the inventory module).
 - iOS and Android batches run separately (one tool per batch), but you can send them to the same output folder and the coverage database will cover both.
 - If an extraction comes back with no inventory data, look closer at it. That's how I found out my "Felix" Android image was actually an iPhone 8 running iOS 17.6.1 — no `packages.xml`, no `build.prop`, because there was no Android in there at all. The tooling flagged it on the first run.
+
+![App parsing coverage per test image](images/chart_coverage_per_image.png)
+*Real numbers from my five iOS test images: installed apps per image, and the slice app-specific modules parsed.*
 
 What do you do with `batch_apps.sqlite` once you have it? That's the second guide.
 
