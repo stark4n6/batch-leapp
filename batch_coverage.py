@@ -513,6 +513,28 @@ def _resolve_owner_apps(out_con, log=print):
 # Materialized copies of the views, enriched with the extraction name so the
 # LAVA grid is useful standalone. LAVA reads concrete tables, not views.
 _LAVA_MATERIALIZE = (
+    ("coverage_summary", """
+     SELECT e.input_name, e.tool, e.tool_version, e.os_version, e.device_name,
+            (SELECT COUNT(*) FROM v_app_coverage c
+              WHERE c.extraction_id = e.extraction_id) AS apps_present,
+            (SELECT COUNT(*) FROM v_app_coverage c
+              WHERE c.extraction_id = e.extraction_id
+                AND c.files_matched_specific > 0) AS apps_parsed,
+            (SELECT COUNT(*) FROM v_app_coverage c
+              WHERE c.extraction_id = e.extraction_id
+                AND c.files_matched_specific = 0) AS apps_not_parsed,
+            ROUND(100.0 * (SELECT COUNT(*) FROM v_app_coverage c
+              WHERE c.extraction_id = e.extraction_id
+                AND c.files_matched_specific > 0)
+              / MAX(1, (SELECT COUNT(*) FROM v_app_coverage c
+              WHERE c.extraction_id = e.extraction_id)), 1) AS percent_parsed,
+            (SELECT COUNT(*) FROM installed_apps i
+              WHERE i.extraction_id = e.extraction_id) AS app_containers,
+            (SELECT COUNT(*) FROM app_files f
+              WHERE f.extraction_id = e.extraction_id) AS files_inventoried,
+            (SELECT COUNT(DISTINCT m.file_path) FROM artifact_files m
+              WHERE m.extraction_id = e.extraction_id) AS files_matched
+     FROM extractions e ORDER BY e.input_name"""),
     ("apps_not_parsed", "SELECT * FROM v_apps_not_parsed"),
     ("apps_not_parsed_rollup", "SELECT * FROM v_apps_not_parsed_rollup"),
     ("app_coverage",
@@ -529,6 +551,10 @@ _LAVA_MATERIALIZE = (
 # Artifacts exposed to LAVA: (table, display name, description, tabler icon,
 # {column: lava type}) — 'datetime' columns render as timestamps in LAVA.
 _LAVA_ARTIFACTS = (
+    ("coverage_summary", "Coverage Summary",
+     "One row per extraction: apps present vs apps parsed by app-specific "
+     "modules, percent covered, and inventory scale. The batch scoreboard.",
+     "report-analytics", {}),
     ("apps_not_parsed_rollup", "Apps Not Parsed - Rollup",
      "Apps with data on disk that no app-specific module touched, ranked "
      "across all extractions. The headline coverage view.", "flag", {}),
