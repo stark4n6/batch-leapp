@@ -18,6 +18,11 @@ Point it at a directory of extractions, walk away, and come back to a review-rea
 
 ---
 
+## Guides
+
+- [Batch LEAPP: process all your test images at once](docs/batch-leapp-guide.md) — what it is, release regression testing, and the `--coverage` mode.
+- [Reading the coverage database in LAVA](docs/coverage-analysis-lava.md) — what the reports mean and the analyses to run with them.
+
 ## Download
 
 Prebuilt apps — no Python required:
