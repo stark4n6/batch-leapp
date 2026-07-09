@@ -69,6 +69,9 @@ A few practical notes:
 - iOS and Android batches run separately (one tool per batch), but you can send them to the same output folder and the coverage database will cover both.
 - If an extraction comes back with no inventory data, look closer at it. That's how I found out my "Felix" Android image was actually an iPhone 8 running iOS 17.6.1 — no `packages.xml`, no `build.prop`, because there was no Android in there at all. The tooling flagged it on the first run.
 
+![App parsing coverage per test image](images/chart_coverage_per_image.png)
+*Real numbers from my five iOS test images: installed apps per image, and the slice app-specific modules parsed.*
+
 What do you do with `batch_apps.sqlite` once you have it? That's the second guide.
 
 Questions? Find me at https://abrignoni.github.io or email abrignoni[at]duck[dot]com.

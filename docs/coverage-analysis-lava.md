@@ -23,11 +23,17 @@ Also remember what parsed does NOT mean: it does not mean parsed *well*. One mat
 
 **2. Apps Not Parsed - Rollup** — the target list, and the reason this whole thing exists. One row per app across ALL your images: how many images it appears in, how many it went unparsed in, and total files on disk. Sort by files on disk, descending. In my corpus the top of that list was Snapchat (unparsed in 5 of 5 images, 29k files sitting there), Facebook (4 of 4), Twitter, and YouTube. That's a module-writing roadmap, ranked by evidence volume.
 
+![Top unparsed apps](images/chart_top_unparsed.png)
+*The rollup from my five-image iOS corpus, ranked by evidence volume.*
+
 **3. Apps Not Parsed - Per Extraction** — the same thing, image by image. This is where the interesting nuances live. Instagram showed up in all five of my images but was unparsed in only one — meaning the existing modules work, but something about that one image (app version? migration? new path?) broke pattern matching. That's a bug report waiting to be filed, and it's a different kind of finding than "no module exists."
 
 **4. App Coverage** — the full ledger: every app, every image, three numbers. `files_on_disk` (what the app left behind), `files_matched` (what ANY module touched), `files_matched_specific` (what app-specific modules touched — the one that matters). Use it to check a specific app: filter by bundle ID or package name and you get its whole story across the corpus.
 
 **5. Module App Spread** — the audit trail for the generic/specific split. One row per module per image with the count of distinct apps it matched. Sort descending and eyeball two zones: the top should be obviously-generic sweeps (it will be), and the zone around 10 is where borderline calls happen. In my data `discordChats` matched 10 apps in one image (classified generic there) and 6 in another (specific there). If you ever see a real decoder land in generic territory, either the threshold needs adjusting for your corpus or that module's search patterns are broader than they should be — both are worth knowing.
+
+![Module app spread](images/chart_module_spread.png)
+*Generic sweeps sit far right of the threshold; the focused decoders cluster at one or two apps.*
 
 **6. Unknown Containers** — the safety net. App containers whose owner could not be identified at all. On a good full filesystem extraction this should be **zero** (every container carries its ownership metadata), and zero is a quality signal. Non-zero means partial extraction, damaged metadata, or leftovers from uninstalls — either way, files that belong to nobody, listed so they don't silently vanish from the analysis.
 
