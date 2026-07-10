@@ -20,6 +20,11 @@ Two responsibilities:
    single batch_apps.sqlite with views that answer "which installed apps
    were NOT parsed by the tooling?".
 
+   The aggregate also records per-artifact results (files matched + rows
+   produced), installed-app versions and artifact run errors — the inputs
+   sample_data_update.py uses to populate each artifact's `sample_data`
+   metadata in the LEAPP repos.
+
 Standalone usage (re-aggregate an existing batch output directory):
 
     python3 batch_coverage.py /path/to/batch_output
@@ -185,7 +190,35 @@ CREATE TABLE artifact_files (
     file_path     TEXT,
     app_id        TEXT,   -- resolved by the aggregator
     owner_app_id  TEXT,
-    module_name   TEXT    -- one row per (file, matching module)
+    module_name   TEXT,   -- one row per (file, matching module, artifact)
+    artifact_key  TEXT    -- __artifacts_v2__ function key
+);
+-- one row per (extraction, artifact function key): how many files its
+-- search patterns matched and how many rows it produced. row_count is NULL
+-- when the artifact has no LAVA table (0 rows, non-LAVA output_types, or a
+-- run error — see artifact_errors).
+CREATE TABLE artifact_results (
+    extraction_id INTEGER,
+    module_name   TEXT,   -- py file stem, e.g. 'tikTok'
+    artifact_key  TEXT,   -- __artifacts_v2__ function key, e.g. 'get_tikTok'
+    files_matched INTEGER,
+    row_count     INTEGER
+);
+-- installed-app versions per extraction (feeds sample_data notes)
+CREATE TABLE app_versions (
+    extraction_id INTEGER,
+    app_id        TEXT,   -- bundle id / package name
+    app_name      TEXT,   -- iOS iTunes item_name; '' when unknown
+    version       TEXT,   -- iOS bundleShortVersionString / Android versionCode
+    version_kind  TEXT,   -- ios_app_store | android_gass | android_packages_xml
+    source        TEXT    -- LAVA table the fact came from
+);
+-- artifacts whose read crashed during the run ("Reading X artifact had
+-- errors!" in the screen-output log); they leave no LAVA table, so without
+-- this record a crash is indistinguishable from 0 rows.
+CREATE TABLE artifact_errors (
+    extraction_id INTEGER,
+    artifact_key  TEXT
 );
 -- group containers (group.com.x) and app extensions (com.x.SomeExtension)
 -- folded into the app that owns them; coverage is computed on owner_app_id
@@ -197,6 +230,9 @@ CREATE TABLE app_aliases (
 CREATE INDEX idx_app_files ON app_files(extraction_id, app_id);
 CREATE INDEX idx_app_files_owner ON app_files(extraction_id, owner_app_id);
 CREATE INDEX idx_artifact_files ON artifact_files(extraction_id, owner_app_id);
+CREATE INDEX idx_artifact_files_key ON artifact_files(extraction_id, artifact_key);
+CREATE INDEX idx_artifact_results ON artifact_results(extraction_id, artifact_key);
+CREATE INDEX idx_app_versions ON app_versions(extraction_id, app_id);
 CREATE INDEX idx_installed ON installed_apps(extraction_id, app_id);
 CREATE INDEX idx_aliases ON app_aliases(extraction_id, app_id);
 
@@ -325,6 +361,150 @@ def _first(props, *keys):
     return ""
 
 
+def _sanitize_sql_name(name):
+    """Mirror of the LEAPPs' lavafuncs.sanitize_sql_name — MUST stay in sync.
+
+    It derives an artifact's LAVA table name from its __artifacts_v2__
+    function key: strip non-word/non-space chars, whitespace -> '_',
+    prepend '_' unless the result starts with a letter/underscore, lowercase.
+    """
+    sanitized = re.sub(r'[^\w\s]', '', str(name))
+    sanitized = re.sub(r'\s+', '_', sanitized)
+    if sanitized and not sanitized[0].isalpha() and sanitized[0] != '_':
+        sanitized = '_' + sanitized
+    return sanitized.lower()
+
+
+def _os_version_fallback(con):
+    """OS version from LEAPP artifact tables when extractioninfo lacks it
+    (e.g. the inventory module did not run)."""
+    queries = (
+        # iLEAPP
+        ("last_build",
+         "SELECT property_value FROM last_build WHERE property = 'ProductVersion'"),
+        ("system_version_plist",
+         "SELECT property_value FROM system_version_plist WHERE property = 'ProductVersion'"),
+        # ALEAPP (build.py labels the ro.*.build.version.release row 'Android Version')
+        ("get_build",
+         "SELECT value FROM get_build WHERE key = 'Android Version'"),
+        ("usagestatsversion",
+         "SELECT property_value FROM usagestatsversion WHERE property = 'Android Version'"),
+    )
+    for table, sql in queries:
+        if not _table_exists(con, table):
+            continue
+        try:
+            row = con.execute(sql).fetchone()
+        except sqlite3.Error:
+            continue
+        if row and row[0]:
+            return str(row[0])
+    return ""
+
+
+def _ingest_artifact_results(out_con, con, extraction_id):
+    """Per (module, artifact function key): files matched by its search
+    patterns and, when a LAVA table exists, the rows it produced."""
+    if not _table_exists(con, "_artifact_search_patterns"):
+        return
+    rows = con.execute("""
+        SELECT p.module_name, p.artifact_name,
+               COUNT(DISTINCT f.file_path) AS files_matched
+        FROM _artifact_search_patterns p
+        LEFT JOIN _artifact_pattern_to_file link
+               ON link.artifact_search_pattern_id = p.id
+        LEFT JOIN _file_path_list f ON f.id = link.file_path_id
+        WHERE p.module_name != ?
+        GROUP BY p.module_name, p.artifact_name""", (INVENTORY_MODULE,))
+    for module, artifact, files_matched in rows:
+        row_count = None
+        if files_matched:
+            table = _sanitize_sql_name(artifact)
+            if table and _table_exists(con, table):
+                row_count = con.execute(
+                    f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+        out_con.execute("INSERT INTO artifact_results VALUES (?,?,?,?,?)",
+                        (extraction_id, module, artifact, files_matched,
+                         row_count))
+
+
+def _ingest_app_versions(out_con, con, extraction_id):
+    """Installed-app versions from the run's LAVA artifact tables."""
+    # iOS App Store metadata (appItunesmeta artifact); one row per app
+    # container, so keep the first non-empty version per bundle id.
+    if _table_exists(con, "get_appitunesmeta"):
+        cols = set(_columns(con, "get_appitunesmeta"))
+        if {"bundle_id", "version_number"} <= cols:
+            name_expr = "item_name" if "item_name" in cols else "''"
+            best = OrderedDict()
+            for bid, name, ver in con.execute(
+                    f"SELECT bundle_id, {name_expr}, version_number"
+                    " FROM get_appitunesmeta"):
+                if bid and ver and bid not in best:
+                    best[bid] = (name or "", str(ver))
+            for bid, (name, ver) in best.items():
+                out_con.execute(
+                    "INSERT INTO app_versions VALUES (?,?,?,?,?,?)",
+                    (extraction_id, bid, name, ver,
+                     "ios_app_store", "get_appitunesmeta"))
+    # Android versionCode from Play services gass.db (installedappsGass
+    # artifact): prefer the user-0 row, then the highest versionCode.
+    if _table_exists(con, "get_installedappsgass"):
+        cols = set(_columns(con, "get_installedappsgass"))
+        if {"bundle_id", "version_code"} <= cols:
+            user_expr = '"user"' if "user" in cols else "''"
+            best = {}
+            for user, bid, vcode in con.execute(
+                    f"SELECT {user_expr}, bundle_id, version_code"
+                    " FROM get_installedappsgass"):
+                if not bid:
+                    continue
+                try:
+                    numeric = int(vcode)
+                except (TypeError, ValueError):
+                    continue
+                rank = (1 if str(user) == "0" else 0, numeric)
+                if bid not in best or rank > best[bid]:
+                    best[bid] = rank
+            for bid, (_pref, numeric) in best.items():
+                out_con.execute(
+                    "INSERT INTO app_versions VALUES (?,?,?,?,?,?)",
+                    (extraction_id, bid, "", str(numeric),
+                     "android_gass", "get_installedappsgass"))
+    # Phase-2 hook: an ALEAPP appInventory that emits packages.xml's @version
+    # adds a version_code column to installedappinventory.
+    if _table_exists(con, "installedappinventory"):
+        cols = set(_columns(con, "installedappinventory"))
+        if {"package_name", "version_code"} <= cols:
+            for pkg, vcode in con.execute(
+                    "SELECT DISTINCT package_name, version_code"
+                    " FROM installedappinventory"):
+                if pkg and vcode not in (None, ""):
+                    out_con.execute(
+                        "INSERT INTO app_versions VALUES (?,?,?,?,?,?)",
+                        (extraction_id, pkg, "", str(vcode),
+                         "android_packages_xml", "installedappinventory"))
+
+
+_ERROR_LINE_RE = re.compile(r"Reading (\S+) artifact had errors!")
+
+
+def _scan_run_errors(out_con, extraction_id, report_dir):
+    """Record artifacts whose read crashed. The framework swallows the
+    exception and logs 'Reading <func_key> artifact had errors!' to the
+    screen-output log; no trace lands in the LAVA db."""
+    log_file = report_dir / "_HTML" / "_Script_Logs" / "Screen_Output.html"
+    if not log_file.is_file():
+        return
+    try:
+        text = log_file.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return
+    for key in sorted(set(_ERROR_LINE_RE.findall(text))):
+        out_con.execute("INSERT INTO artifact_errors VALUES (?,?)",
+                        (extraction_id, key))
+
+
 def _norm_path(path, input_path):
     """Normalize a recorded path so app_files and artifact_files line up.
 
@@ -378,7 +558,8 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
              _first(props, "Extraction Type") or lava_json.get("param_type", ""),
              _first(props, "Input Name") or Path(str(input_path)).name,
              str(input_path),
-             _first(props, "iOS Version", "Android Version"),
+             _first(props, "iOS Version", "Android Version")
+             or _os_version_fallback(con),
              _first(props, "Device Name"),
              _first(props, "Model", "Product Type"),
              _first(props, "Manufacturer"),
@@ -435,21 +616,25 @@ def _ingest_report(out_con, extraction_id, report_dir, dest_name, manifest_row):
                     (extraction_id, pid, module, artifact, regex))
         if _table_exists(con, "_artifact_pattern_to_file"):
             seen = set()
-            for fpath, module in con.execute("""
-                    SELECT DISTINCT f.file_path, p.module_name
+            for fpath, module, artifact in con.execute("""
+                    SELECT DISTINCT f.file_path, p.module_name, p.artifact_name
                     FROM _artifact_pattern_to_file link
                     JOIN _file_path_list f ON f.id = link.file_path_id
                     JOIN _artifact_search_patterns p
                          ON p.id = link.artifact_search_pattern_id
                     WHERE p.module_name != ?""", (INVENTORY_MODULE,)):
                 norm = _norm_path(fpath, input_path)
-                if (norm, module) in seen:
+                if (norm, module, artifact) in seen:
                     continue
-                seen.add((norm, module))
+                seen.add((norm, module, artifact))
                 app_id = _map_path_to_app(norm, tool, uuid_map)
                 out_con.execute(
-                    "INSERT INTO artifact_files VALUES (?,?,?,?,?)",
-                    (extraction_id, norm, app_id, app_id, module))
+                    "INSERT INTO artifact_files VALUES (?,?,?,?,?,?)",
+                    (extraction_id, norm, app_id, app_id, module, artifact))
+
+        _ingest_artifact_results(out_con, con, extraction_id)
+        _ingest_app_versions(out_con, con, extraction_id)
+        _scan_run_errors(out_con, extraction_id, report_dir)
     finally:
         con.close()
     return True
@@ -582,6 +767,16 @@ _LAVA_ARTIFACTS = (
     ("artifact_files", "Artifact Matched Files",
      "Files matched by LEAPP module search patterns (inventory module "
      "excluded), resolved to their owning app.", "search", {}),
+    ("artifact_results", "Artifact Results",
+     "Per extraction and artifact: files matched by its search patterns and "
+     "rows produced. An empty row count means the artifact wrote no LAVA "
+     "table (0 rows, non-LAVA output types, or a run error).", "list-check", {}),
+    ("app_versions", "App Versions",
+     "Installed-app versions per extraction (iOS App Store metadata / "
+     "Android Play-services versionCode).", "versions", {}),
+    ("artifact_errors", "Artifact Run Errors",
+     "Artifacts whose read crashed during the run; they leave no LAVA table, "
+     "so without this a crash looks like 0 rows.", "alert-triangle", {}),
 )
 
 _COLUMN_LABEL_OVERRIDES = {
