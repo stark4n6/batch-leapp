@@ -22,6 +22,7 @@ Point it at a directory of extractions, walk away, and come back to a review-rea
 
 - [Batch LEAPP: process all your test images at once](docs/batch-leapp-guide.md) — what it is, release regression testing, and the `--coverage` mode.
 - [Reading the coverage database in LAVA](docs/coverage-analysis-lava.md) — what the reports mean and the analyses to run with them.
+- [Populating artifact `sample_data` from a test-image corpus](docs/sample-data.md) — auto-record per-image OS/app versions and row counts in the iLEAPP/ALEAPP artifact metadata.
 
 ## Download
 
@@ -174,9 +175,38 @@ Re-aggregate an existing batch output (no re-run needed) with:
 python3 batch_coverage.py ~/reports
 ```
 
+The aggregate also records per-artifact results (`artifact_results`),
+installed-app versions (`app_versions`) and artifact run errors
+(`artifact_errors`) — the inputs for `sample_data` population below.
+
 Notes: requires LEAPP **source checkouts** that contain the App Inventory
 module (compiled binaries don't bundle it); RLEAPP/VLEAPP batches aggregate
 run metadata but have no app inventory by design.
+
+---
+
+## Artifact `sample_data` population (developers)
+
+`sample_data_update.py` turns coverage databases into `sample_data` entries in
+the iLEAPP/ALEAPP artifact metadata — per test image: device OS version, the
+owning app's version and the row count the artifact produced:
+
+```bash
+python3 sample_data_update.py \
+    --db /corpus_out/ios/batch_apps.sqlite --db /corpus_out/android/batch_apps.sqlite \
+    --samples /corpus/samples.json \
+    --ileapp ~/GitHub/iLEAPP --aleapp ~/GitHub/ALEAPP          # dry run; add --apply to edit
+```
+
+An artifact gets an entry for every registered sample whose extraction
+matched at least one of its files (0-row outcomes included). Only sample keys
+registered in `samples.json` are managed; hand-written notes are preserved.
+Edits are metadata-only, style-preserving and idempotent, and `--apply`
+validates with ast re-parse, `py_compile`, a PluginLoader plugin-count smoke
+test and a pylint new-warning check (restoring the originals on failure).
+
+See [docs/sample-data.md](docs/sample-data.md) for the samples.json format,
+the entry grammar and the full runbook.
 
 ---
 
