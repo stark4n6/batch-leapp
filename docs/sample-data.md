@@ -63,7 +63,11 @@ doesn't know are always left alone.
 ```
 
 - The **key** (`josh_ios_15`) becomes the `sample_data` key in the artifacts.
-- `match.zip` is the input archive's file name (add `"sha256"` to pin it).
+- `match.zip` is the input archive's file name — or its **corpus-relative
+  path** (e.g. `"Otto/EXTRACTION_FFS 01/EXTRACTION_FFS.zip"`) when several
+  archives share a name, as Cellebrite's `EXTRACTION_FFS.zip` exports do.
+  Add `"sha256"` to pin the exact input. `--init-samples` picks the right
+  form automatically.
 - `os_version` / `app_versions` are **manual overrides** for when
   auto-detection fails or is wrong — an override always wins. Android
   overrides also replace the raw `versionCode` with your human-readable

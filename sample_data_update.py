@@ -77,36 +77,72 @@ def load_samples(path: Path):
     return samples
 
 
-def sample_key_from_zip(zip_name: str) -> str:
-    """Default sample key: sanitized archive stem."""
-    stem = Path(zip_name).stem
-    key = re.sub(r"[^A-Za-z0-9]+", "_", stem).strip("_").lower()
-    return key or "sample"
+def _sanitize_key(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9]+", "_", text).strip("_").lower()
+
+
+def _zip_matches(want: str, ext) -> bool:
+    """Match a samples.json match.zip value against an extraction.
+
+    A value containing a path separator is compared against the archive's
+    corpus-relative path (needed when several archives share a file name,
+    e.g. Cellebrite's EXTRACTION_FFS.zip); a bare name matches the basename.
+    """
+    want = str(want).replace("\\", "/")
+    ext_zip = (ext["zip"] or "").replace("\\", "/")
+    if "/" in want:
+        return ext_zip == want
+    return Path(ext_zip).name == want or ext["input_name"] == want
+
+
+def _derive_key(zip_rel: str, taken) -> str:
+    """Stub key for an archive: its stem, disambiguated by parent path
+    components when several archives share a name."""
+    parts = Path(zip_rel.replace("\\", "/")).parts
+    stem = _sanitize_key(Path(parts[-1]).stem) or "sample"
+    candidates = [stem]
+    if len(parts) > 1:
+        candidates.append(_sanitize_key(f"{parts[0]}_{stem}"))
+        candidates.append(_sanitize_key(
+            "_".join(list(parts[:-1]) + [Path(parts[-1]).stem])))
+    for candidate in candidates:
+        if candidate and candidate not in taken:
+            return candidate
+    base, n = stem, 2
+    while f"{base}_{n}" in taken:
+        n += 1
+    return f"{base}_{n}"
 
 
 def init_samples(samples_path: Path, samples, extractions, log=print):
     """Append stub entries for extractions not matched by any sample."""
-    matched_zips = {spec["match"]["zip"] for spec in samples.values()}
+    basenames = {}
+    for ext in extractions:
+        name = Path((ext["zip"] or ext["input_name"] or "")).name
+        basenames[name] = basenames.get(name, 0) + 1
     added = 0
     for ext in extractions:
-        zip_name = Path(ext["zip"] or ext["input_name"] or "").name
-        if not zip_name or zip_name in matched_zips:
+        zip_rel = (ext["zip"] or ext["input_name"] or "").replace("\\", "/")
+        if not zip_rel:
             continue
-        key = sample_key_from_zip(zip_name)
-        base, n = key, 2
-        while key in samples:
-            key, n = f"{base}_{n}", n + 1
+        if any(_zip_matches(spec["match"]["zip"], ext)
+               for spec in samples.values()):
+            continue
+        basename = Path(zip_rel).name
+        # ambiguous basename -> register the corpus-relative path instead
+        match_zip = zip_rel if (basenames.get(basename, 0) > 1
+                                and "/" in zip_rel) else basename
+        key = _derive_key(zip_rel, samples)
         samples[key] = OrderedDict((
-            ("match", {"zip": zip_name}),
+            ("match", {"zip": match_zip}),
             ("platform", "ios" if ext["tool_norm"] == "ileapp" else
                          "android" if ext["tool_norm"] == "aleapp" else ""),
             ("os_version", None),
             ("app_versions", {}),
             ("notes", ""),
         ))
-        matched_zips.add(zip_name)
         added += 1
-        log(f"samples: added stub '{key}' for {zip_name}")
+        log(f"samples: added stub '{key}' for {match_zip}")
     if added:
         with open(samples_path, "w", encoding="utf-8") as f:
             json.dump({"version": 1, "samples": samples}, f, indent=2)
@@ -137,15 +173,16 @@ def load_extractions(db_paths):
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
             for (ext_id, zip_name, input_name, tool, os_version,
-                 report_path) in con.execute(
+                 report_path, sha256) in con.execute(
                     "SELECT extraction_id, zip, input_name, tool,"
-                    " os_version, report_path FROM extractions"):
+                    " os_version, report_path, sha256 FROM extractions"):
                 rows.append({
                     "db": Path(db_path), "extraction_id": ext_id,
                     "zip": zip_name or "", "input_name": input_name or "",
                     "tool": tool or "", "tool_norm": _norm_tool(tool),
                     "os_version": os_version or "",
                     "report_path": report_path or "",
+                    "sha256": sha256 or "",
                 })
         finally:
             con.close()
@@ -157,10 +194,10 @@ def match_samples(samples, extractions, pick_latest, warnings):
     matches are a hard error unless --pick-latest."""
     resolved = {}
     for key, spec in samples.items():
-        want_zip = Path(spec["match"]["zip"]).name
-        hits = [e for e in extractions
-                if Path(e["zip"]).name == want_zip
-                or e["input_name"] == want_zip]
+        want_zip = spec["match"]["zip"]
+        want_sha = (spec["match"].get("sha256") or "").lower()
+        hits = [e for e in extractions if _zip_matches(want_zip, e)
+                and (not want_sha or (e.get("sha256") or "").lower() == want_sha)]
         by_tool = {}
         for ext in hits:
             by_tool.setdefault(ext["tool_norm"], []).append(ext)
